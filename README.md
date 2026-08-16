@@ -33,8 +33,9 @@ spd-say -o voicegarden-spd "Hello from VoiceGarden"
 
 ### From source
 
+Requires a C compiler (vendored protocol sources) and Rust ≥ 1.75; **runtime requires speech-dispatcher 0.12+** (Debian 13+, Ubuntu 25.04+, Fedora 41+, Arch, openSUSE Tumbleweed — server-side audio and the speak queue arrived in 0.12; on 0.11 distros the module loads but speech cannot play).
+
 ```bash
-sudo apt install libspeechd-dev libclang-dev       # Debian/Ubuntu (or your distro's equivalent)
 git clone https://github.com/AACTools/VoiceGarden-SPD
 cd VoiceGarden-SPD
 cargo build --release
@@ -92,7 +93,7 @@ Orca / Firefox / Okular / Qt apps / spd-say
         └─ PCM16 chunks + index marks → server speak queue (HDLC-escaped)
 ```
 
-The module links `libspeechd_module` (from `libspeechd-dev`) statically: the library implements the protocol parsing, audio streaming and event replies; we provide the `module_*` callbacks in Rust. Audio is routed through the speech-dispatcher server, so output-device selection, mixing, volume and pause all work exactly like stock modules.
+The speech-dispatcher module-protocol sources (`module_process.c`, `module_readline.c`, BSD-2-Clause) are vendored under `vendor/` and compiled in — no `libspeechd-dev` needed at build time, and the build works on any distro regardless of its speech-dispatcher version. We provide the `module_*` callbacks in Rust. Audio is routed through the speech-dispatcher server, so output-device selection, mixing, volume and pause all work exactly like stock modules.
 
 ## Configuration
 
@@ -100,7 +101,7 @@ See [`config/voicegarden-spd.conf`](config/voicegarden-spd.conf): `ModelsDir`, `
 
 ## Licences
 
-**Code.** MIT (see [LICENSE](LICENSE)). The built module statically links `libspeechd_module` (BSD-2-Clause, from `libspeechd-dev`).
+**Code.** MIT (see [LICENSE](LICENSE)). The speech-dispatcher module-protocol translation units are vendored under `vendor/` under their upstream licences (see [`vendor/LICENSE.md`](crates/voicegarden-spd/vendor/LICENSE.md)).
 
 **Sherpa-onnx models.** Model licences vary per model and are tracked in the [sherpa-onnx-tts-models](https://github.com/AACTools/sherpa-onnx-tts-models) registry (`license` / `license_url` on every entry; surfaced through rust-tts-wrapper's `SherpaModelInfo`). Common families: Piper voices are mostly MIT/Apache-2.0 (per-voice training datasets may carry additional terms), Kokoro is Apache-2.0, MMS models are CC-BY-NC 4.0 (**non-commercial**), Matcha examples are mostly MIT. Users are responsible for checking a model's licence before use — `voicegarden-spd voices` output and the model registry are the source of truth.
 

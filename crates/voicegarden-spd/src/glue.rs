@@ -1,13 +1,13 @@
-//! FFI declarations for the speech-dispatcher output-module helper library
-//! (`libspeechd_module`, shipped by libspeechd-dev).
+//! FFI declarations for the speech-dispatcher output-module protocol
+//! machinery (`module_process.c` / `module_readline.c`, vendored under
+//! `vendor/` and compiled into this crate by `build.rs`).
 //!
-//! The library implements the server-side of the module protocol: it parses
-//! incoming SSIP-module commands (SPEAK/STOP/PAUSE/SET/LIST VOICES/...),
-//! escapes and streams audio to the server with `module_tts_output_server`,
-//! and prints event replies. Our side of the contract is a set of
-//! `module_*` callbacks declared in `<speech-dispatcher/spd_module_main.h>`
-//! — see `callbacks.rs`. We link the archive statically, so the callbacks
-//! resolve at link time; no dynamic symbol interposition is required.
+//! The vendored code implements the server-side of the module protocol:
+//! it parses incoming SSIP-module commands (SPEAK/STOP/PAUSE/SET/LIST
+//! VOICES/...), escapes and streams audio to the server with
+//! `module_tts_output_server`, and prints event replies. Our side of the
+//! contract is a set of `module_*` callbacks declared in
+//! `vendor/spd_module_main.h` — see `callbacks.rs`.
 
 #![allow(non_camel_case_types)]
 
@@ -50,9 +50,6 @@ pub mod msgtype {
     pub const SPELL: i32 = 99;
 }
 
-// Linked via build.rs `cargo:rust-link-lib` + this attribute (the -sys
-// crate pattern) so the archive is pulled into every final binary.
-#[link(name = "speechd_module", kind = "static")]
 extern "C" {
     /// Read one line from `fd`. Returns a `malloc`ed line (free with
     /// `libc::free`) including the trailing newline, or NULL when `block`

@@ -29,8 +29,8 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libspeechd-dev libclang-dev
+      # The speech-dispatcher protocol sources are vendored, so building
+      # needs nothing beyond the Rust toolchain + a C compiler.
       - run: cargo clippy --all-targets -- -D warnings
 
   test:
@@ -41,58 +41,57 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libspeechd-dev libclang-dev
       # The fake-server suite spawns sd_voicegarden and drives the real
-      # libspeechd_module protocol — no daemon needed.
+      # (vendored) module protocol code — no daemon needed.
       - run: cargo test
-      - name: Upload module binary for smoke job
-        uses: actions/upload-artifact@v4
-        with:
-          name: module-debug
-          path: target/debug/sd_voicegarden
-          retention-days: 1
 
   speechd-smoke:
-    name: Real speechd smoke test
+    name: Real speechd smoke test (Debian, speechd 0.12)
     runs-on: ubuntu-latest
     needs: test
+    container:
+      # Ubuntu runners ship speech-dispatcher 0.11 (no server-side audio);
+      # the module targets 0.12+. Debian trixie has 0.12.x.
+      image: debian:trixie
+    env:
+      HOME: /root
+      XDG_RUNTIME_DIR: /tmp/xdg
     steps:
+      - run: apt-get update && apt-get install -y --no-install-recommends
+             ca-certificates curl bzip2 build-essential pkg-config
+             speech-dispatcher speech-dispatcher-audio-plugins
+             pulseaudio pulseaudio-utils git
+
+      - name: Install Rust
+        run: |
+          curl -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+
       - uses: actions/checkout@v4
-      - uses: actions-rust-lang/setup-rust-toolchain@v1
-        with:
-          toolchain: stable
-      - name: Install speech-dispatcher + audio
-        run: sudo apt-get update && sudo apt-get install -y speech-dispatcher spd-say pulseaudio pulseaudio-utils curl bzip2
-      - name: Download module artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: module-debug
-          path: bin
+
+      - name: Build module
+        run: cargo build --bin sd_voicegarden
+
       - name: Start PulseAudio with a null sink
         run: |
-          export XDG_RUNTIME_DIR=/tmp/xdg
-          mkdir -p "$XDG_RUNTIME_DIR"
-          chmod 700 "$XDG_RUNTIME_DIR"
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           pulseaudio -D --exit-idle-time=-1 --disallow-exit 2>&1 || true
           sleep 1
-          pactl info || (echo "pulse failed to start" && exit 1)
+          pactl info || (echo "pulse failed to start"; exit 1)
           pactl load-module module-null-sink sink_name=voicegarden || true
 
       - name: Register module with user speechd config
         run: |
-          chmod +x bin/sd_voicegarden
           mkdir -p ~/.config/speech-dispatcher/modules
           cp config/voicegarden-spd.conf ~/.config/speech-dispatcher/modules/
           cat > ~/.config/speech-dispatcher/speechd.conf <<EOF
-          AddModule "voicegarden-spd" "$GITHUB_WORKSPACE/bin/sd_voicegarden" "voicegarden-spd.conf"
+          AddModule "voicegarden-spd" "$GITHUB_WORKSPACE/target/debug/sd_voicegarden" "voicegarden-spd.conf"
           EOF
 
       - name: LIST VOICES with a stub model
         run: |
           mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
           touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
-          export XDG_RUNTIME_DIR=/tmp/xdg
           speech-dispatcher --spawn
           sleep 2
           spd-say -o voicegarden-spd -L | tee /tmp/voices.txt
@@ -100,7 +99,6 @@ jobs:
 
       - name: SPEAK with a real model (end-to-end audio)
         run: |
-          export XDG_RUNTIME_DIR=/tmp/xdg
           cd ~/.rust-tts-wrapper/sherpaonnx
           curl -fsSL -o piper.tar.bz2 \
             https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2

@@ -19,7 +19,7 @@ jobs:
           toolchain: stable
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y libspeechd-dev libclang-dev
+        run: sudo apt-get update && sudo apt-get install -y libclang-dev
 
       - name: Verify tag matches crate version
         run: |
