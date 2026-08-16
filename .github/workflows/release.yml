@@ -85,36 +85,44 @@ jobs:
 
   test-deb:
     name: Package smoke test (.deb, ${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: ubuntu-latest
     needs: build
+    # Ubuntu runners ship speech-dispatcher 0.11 (no server-side audio);
+    # run in trixie containers like the CI smoke job so the .deb is
+    # exercised against speechd 0.12.
+    container:
+      image: debian:trixie
+    env:
+      HOME: /root
+      XDG_RUNTIME_DIR: /tmp/xdg
     strategy:
       fail-fast: false
       matrix:
         include:
           - arch: x86_64
-            runner: ubuntu-latest
+            deb_arch: amd64
           - arch: aarch64
-            runner: ubuntu-latest-arm
+            deb_arch: arm64
     steps:
       - name: Install the .deb on this runner
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y speech-dispatcher curl bzip2 pulseaudio pulseaudio-utils
+          apt-get update -qq
+          apt-get install -y --no-install-recommends ca-certificates curl bzip2 \
+              speech-dispatcher speech-dispatcher-audio-plugins \
+              pulseaudio pulseaudio-utils
       - uses: actions/download-artifact@v4
         with:
           name: release-artifacts-${{ matrix.arch }}
       - name: dpkg install
         run: |
-          DEB=$(ls voicegarden-spd_*_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb)
-          sudo apt-get install -y "./$DEB"
-          dpkg -L voicegarden-spd | grep -E 'sd_voicegarden|voicegarden-spd$|modules/voicegarden-spd.conf'
+          DEB=$(ls voicegarden-spd_*_${{ matrix.deb_arch }}.deb)
+          apt-get install -y "./$DEB"
+          dpkg -L voicegarden-spd | grep -E 'sd_voicegarden|usr/bin|modules/voicegarden-spd.conf'
           voicegarden-spd --version
-      - name: Register user config + end-to-end speak
-        env:
-          XDG_RUNTIME_DIR: /tmp/xdg
+      - name: End-to-end speak
         run: |
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
-          pulseaudio -D --exit-idle-time=-1 2>&1 || true
+          pulseaudio -D --exit-idle-time=-1 --disallow-exit 2>&1 || true
           sleep 1
           pactl load-module module-null-sink || true
           mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
@@ -129,7 +137,9 @@ jobs:
       - name: doctor (post-install diagnostics)
         run: voicegarden-spd doctor || true
       - name: clean removal
-        run: sudo apt-get remove -y voicegarden-spd && ! dpkg -l voicegarden-spd | grep -q '^ii'
+        run: |
+          apt-get remove -y voicegarden-spd
+          ! dpkg -l voicegarden-spd | grep -q '^ii'
 
   publish:
     name: Publish GitHub release
