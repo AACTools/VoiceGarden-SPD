@@ -69,8 +69,8 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - name: Build module
-        run: cargo build --bin sd_voicegarden
+      - name: Build module + tools
+        run: cargo build --bin sd_voicegarden --bin voicegarden-spd
 
       - name: Start PulseAudio with a null sink
         run: |
@@ -106,3 +106,8 @@ jobs:
           tar -xjf piper.tar.bz2 -C piper-nl-rdh-low --strip-components=1
           rm piper.tar.bz2
           spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Hello from the VoiceGarden speech dispatcher module."
+
+      - name: Bench (informational — cold vs warm synthesis)
+        run: |
+          "$GITHUB_WORKSPACE/target/debug/voicegarden-spd" bench \
+            piper-nl-rdh-low#0 "The quick brown fox jumps over the lazy dog." 3

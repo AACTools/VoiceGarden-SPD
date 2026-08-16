@@ -212,6 +212,34 @@ pub fn apply(text: &str, pp: Preprocess) -> String {
     t
 }
 
+/// XML-escape text for embedding in generated SSML.
+#[must_use]
+pub fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+/// SSML spelling for engines with native support (Azure, Edge, Google):
+/// each word wrapped in `<say-as interpret-as="characters">`, which the
+/// engine spells with its own prosody — better than our comma-separated
+/// letter approximation. Only used when the voice is SSML-capable and the
+/// client didn't send SSML of its own.
+#[must_use]
+pub fn spelling_ssml(text: &str) -> String {
+    let mut out = String::from("<speak>");
+    for word in text.split_whitespace() {
+        out.push_str("<say-as interpret-as=\"characters\">");
+        out.push_str(&xml_escape(word));
+        out.push_str("</say-as> ");
+    }
+    if out.len() > "<speak>".len() {
+        out.pop(); // trailing space
+    }
+    out.push_str("</speak>");
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -293,5 +321,30 @@ mod tests {
         assert_eq!(PunctMode::parse("some"), Some(PunctMode::Some));
         assert_eq!(PunctMode::parse("bogus"), None);
         assert_eq!(CapMode::parse("icon"), Some(CapMode::Icon));
+    }
+
+    #[test]
+    fn spelling_ssml_wraps_words() {
+        assert_eq!(
+            spelling_ssml("hi yo"),
+            "<speak><say-as interpret-as=\"characters\">hi</say-as> \
+             <say-as interpret-as=\"characters\">yo</say-as></speak>"
+        );
+    }
+
+    #[test]
+    fn spelling_ssml_escapes_markup() {
+        // split_whitespace yields three words: "a<b", "&", "c>" — each
+        // must be escaped inside its say-as element.
+        let ssml = spelling_ssml("a<b & c>");
+        assert!(ssml.contains("a&lt;b"), "escaped <: {ssml}");
+        assert!(ssml.contains("&amp;"), "escaped &: {ssml}");
+        assert!(ssml.contains("c&gt;"), "escaped >: {ssml}");
+        assert!(!ssml.contains("<b "), "no raw tag injection");
+    }
+
+    #[test]
+    fn spelling_ssml_empty() {
+        assert_eq!(spelling_ssml(""), "<speak></speak>");
     }
 }

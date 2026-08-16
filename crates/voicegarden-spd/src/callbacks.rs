@@ -217,7 +217,7 @@ pub extern "C" fn module_init(msg: *mut *mut c_char) -> c_int {
     let cfg = config();
     let credentials = load_credentials(&cfg.credentials_file);
     let cache = load_voice_cache(&cfg.voice_cache_file);
-    let mut list = local_sherpa_voices(&cfg.models_dir, cfg.num_threads);
+    let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
     let cloud_count = {
         let cloud = cloud_voices(&cache, &credentials);
         let n = cloud.len();
@@ -335,24 +335,44 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
     unsafe { glue::module_speak_ok() };
 
     // Accessibility expansions (punctuation announcement, spelling,
-    // capitals) apply to the plain text; when active they disable SSML
-    // passthrough since the engine must see the expanded plain text.
+    // capitals) apply to the plain text. Two delivery strategies:
+    //
+    //  * SSML-capable engine + spelling wanted + client sent plain text →
+    //    native `<say-as interpret-as="characters">` spelling (engine
+    //    prosody beats our comma-separated approximation); punctuation /
+    //    capital expansions still apply to the wrapped words.
+    //  * otherwise → plain-text expansion via preprocess::apply.
+    //
+    // When expansions are active they disable SSML passthrough, since the
+    // engine must see the expanded text.
     let pp = crate::preprocess::Preprocess {
         punctuation: settings.punctuation,
         spelling: settings.spelling || msgtype_ == msgtype::SPELL,
         capitals: settings.capitals,
     };
-    if pp.is_active() {
-        plain = crate::preprocess::apply(&plain, pp);
-    }
+    let native_spelling = pp.spelling && voice.ssml_capable && processed.ssml.is_none();
 
-    // SSML passthrough: engines that accept SSML receive the client's
-    // markup (minus <mark> tags, which this module times itself). This
-    // gives clients <prosody>/<break>/<say-as>/<sub> and SpeechMarkdown
-    // (converted inside rust-tts-wrapper's speak()).
-    let synth_text: &str = if pp.is_active() {
+    let spelled_ssml;
+    let synth_text: &str = if native_spelling {
+        let mut text = plain.clone();
+        let without_spelling = crate::preprocess::Preprocess {
+            spelling: false,
+            ..pp
+        };
+        if without_spelling.is_active() {
+            text = crate::preprocess::apply(&text, without_spelling);
+            plain = text.clone();
+        }
+        spelled_ssml = crate::preprocess::spelling_ssml(&text);
+        &spelled_ssml
+    } else if pp.is_active() {
+        plain = crate::preprocess::apply(&plain, pp);
         plain.as_str()
     } else {
+        // SSML passthrough: engines that accept SSML receive the client's
+        // markup (minus <mark> tags, which this module times itself). This
+        // gives clients <prosody>/<break>/<say-as>/<sub> and SpeechMarkdown
+        // (converted inside rust-tts-wrapper's speak()).
         processed
             .ssml
             .as_deref()
@@ -361,6 +381,16 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
     };
 
     let prosody = Prosody::from_spd(settings.rate, settings.pitch, settings.volume);
+    if LOG_LEVEL.load(Ordering::Relaxed) >= 4 {
+        let preview: String = synth_text.chars().take(160).collect();
+        eprintln!(
+            "voicegarden-spd: engine '{}' voice '{}' ← {:?}{}",
+            voice.engine_id,
+            voice.engine_voice_id,
+            preview,
+            if synth_text.len() > 160 { "…" } else { "" }
+        );
+    }
     pipeline::speak(
         engine,
         &voice,

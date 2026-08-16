@@ -187,7 +187,7 @@ pub fn status(cfg: &crate::config::ModuleConfig) -> Status {
         })
         .unwrap_or(false);
 
-    let local = crate::voices::local_sherpa_voices(&cfg.models_dir, cfg.num_threads);
+    let local = crate::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
     let cache = crate::voices::load_voice_cache(&cfg.voice_cache_file);
     let creds = crate::voices::load_credentials(&cfg.credentials_file);
     let cloud = crate::voices::cloud_voices(&cache, &creds);

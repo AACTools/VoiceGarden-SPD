@@ -8,9 +8,14 @@ use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct ModuleConfig {
-    /// Directory containing downloaded sherpa-onnx models (one subdirectory
-    /// per model id).
+    /// Primary directory containing downloaded sherpa-onnx models (one
+    /// subdirectory per model id).
     pub models_dir: PathBuf,
+    /// Older model directories still scanned as fallbacks (the
+    /// rust-tts-wrapper layout `~/.rust-tts-wrapper/sherpaonnx`), so
+    /// existing users' models keep working. `voicegarden-spd
+    /// migrate-models` moves them into `models_dir`.
+    pub legacy_models_dirs: Vec<PathBuf>,
     /// JSON file mapping engine id → credentials object.
     pub credentials_file: PathBuf,
     /// Voice-list cache written by `voicegarden-spd-refresh`.
@@ -32,7 +37,8 @@ impl Default for ModuleConfig {
     fn default() -> Self {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         Self {
-            models_dir: PathBuf::from(&home).join(".rust-tts-wrapper/sherpaonnx"),
+            models_dir: PathBuf::from(&home).join(".local/share/voicegarden/sherpa-onnx-models"),
+            legacy_models_dirs: vec![PathBuf::from(&home).join(".rust-tts-wrapper/sherpaonnx")],
             credentials_file: PathBuf::from(&home).join(".config/voicegarden-spd/engines.json"),
             voice_cache_file: PathBuf::from(&home).join(".cache/voicegarden-spd/voices.json"),
             default_voice: None,
@@ -44,6 +50,19 @@ impl Default for ModuleConfig {
 }
 
 impl ModuleConfig {
+    /// All model directories to scan: the primary first, then legacy
+    /// fallbacks (deduplicated). Voices found earlier win.
+    #[must_use]
+    pub fn models_dirs(&self) -> Vec<PathBuf> {
+        let mut dirs = vec![self.models_dir.clone()];
+        for d in &self.legacy_models_dirs {
+            if !dirs.contains(d) {
+                dirs.push(d.clone());
+            }
+        }
+        dirs
+    }
+
     /// Parse a configuration file. Unknown keys are ignored (with a
     /// warning to stderr) so future versions stay compatible. A missing
     /// file yields the defaults.

@@ -21,6 +21,8 @@ Usage:
   voicegarden-spd refresh [--config FILE]     Refresh the cloud voice cache
   voicegarden-spd voices [--config FILE]      List all merged voices
   voicegarden-spd speak <voice> <text>        Speak once through rust-tts-wrapper directly
+  voicegarden-spd bench <voice> [text] [N]    Cold + warm synthesis timings (no playback)
+  voicegarden-spd migrate-models              Move legacy models into the primary models dir
   voicegarden-spd --version
 
 Environment:
@@ -45,6 +47,8 @@ fn main() -> ExitCode {
         "refresh" => cmd_refresh(&args[1..]),
         "voices" => cmd_voices(&args[1..]),
         "speak" => cmd_speak(&args[1..]),
+        "bench" => cmd_bench(&args[1..]),
+        "migrate-models" => cmd_migrate_models(),
         "--help" | "-h" => {
             print!("{USAGE}");
             Ok(())
@@ -207,7 +211,8 @@ fn cmd_voices(args: &[String]) -> Result<(), String> {
     let cfg = ModuleConfig::load(config_arg(args)?.as_deref());
     let credentials = voicegarden_spd::voices::load_credentials(&cfg.credentials_file);
     let cache = voicegarden_spd::voices::load_voice_cache(&cfg.voice_cache_file);
-    let mut local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dir, cfg.num_threads);
+    let mut local =
+        voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
     let mut cloud = voicegarden_spd::voices::cloud_voices(&cache, &credentials);
 
     println!("{:<44} {:<8} {:<8}", "VOICE", "LANG", "VARIANT");
@@ -231,7 +236,7 @@ fn cmd_speak(args: &[String]) -> Result<(), String> {
     let cfg = ModuleConfig::load(None);
     let credentials = voicegarden_spd::voices::load_credentials(&cfg.credentials_file);
     let cache = voicegarden_spd::voices::load_voice_cache(&cfg.voice_cache_file);
-    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dir, cfg.num_threads);
+    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
     let cloud = voicegarden_spd::voices::cloud_voices(&cache, &credentials);
     let voice = local
         .iter()
@@ -263,6 +268,130 @@ fn cmd_speak(args: &[String]) -> Result<(), String> {
 
     // Write a minimal WAV and hand it to the first available player.
     write_wav_and_play(&pcm, rate)
+}
+
+/// Synthesise `text` through `voice`, returning (bytes, elapsed).
+fn synth_once(
+    engine: &std::sync::Arc<dyn rust_tts_wrapper::engine::TtsEngine>,
+    voice_id: &str,
+    text: &str,
+) -> Result<(usize, std::time::Duration), String> {
+    let mut total = 0usize;
+    let t0 = std::time::Instant::now();
+    engine
+        .speak_sync(
+            text,
+            Some(voice_id),
+            1.0,
+            1.0,
+            1.0,
+            Some(&mut |chunk: &[u8]| total += chunk.len()),
+            None,
+        )
+        .map_err(|e| e.to_string())?;
+    Ok((total, t0.elapsed()))
+}
+
+fn cmd_bench(args: &[String]) -> Result<(), String> {
+    let voice_name = args
+        .first()
+        .ok_or("usage: voicegarden-spd bench <voice> [text] [runs]")?
+        .clone();
+    let text = args.get(1).map_or_else(
+        || "The quick brown fox jumps over the lazy dog.".to_string(),
+        Clone::clone,
+    );
+    let runs: usize = match args.get(2) {
+        Some(v) => v.parse().map_err(|_| "runs must be a number".to_string())?,
+        None => 5,
+    };
+
+    let cfg = ModuleConfig::load(None);
+    let credentials = voicegarden_spd::voices::load_credentials(&cfg.credentials_file);
+    let cache = voicegarden_spd::voices::load_voice_cache(&cfg.voice_cache_file);
+    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    let cloud = voicegarden_spd::voices::cloud_voices(&cache, &credentials);
+    let voice = local
+        .iter()
+        .chain(cloud.iter())
+        .find(|v| v.spd_name == voice_name)
+        .ok_or_else(|| format!("voice '{voice_name}' not found — see `voicegarden-spd voices`"))?
+        .clone();
+
+    let engine = rust_tts_wrapper::create_engine(&voice.engine_id, &voice.credentials)
+        .ok_or_else(|| format!("engine '{}' unavailable", voice.engine_id))?;
+
+    // Cold run: first synthesis on this engine instance. For sherpa-onnx
+    // this includes loading + initialising the ONNX model; for cloud it is
+    // one network round trip.
+    let (cold_bytes, cold) = synth_once(&engine, &voice.engine_voice_id, &text)?;
+    println!(
+        "cold  : {:>8.1} ms  ({cold_bytes} bytes)  [includes model load for local engines]",
+        cold.as_secs_f64() * 1000.0
+    );
+
+    let mut samples: Vec<f64> = Vec::with_capacity(runs);
+    let mut warm_bytes = cold_bytes;
+    for _ in 0..runs {
+        let (bytes, d) = synth_once(&engine, &voice.engine_voice_id, &text)?;
+        warm_bytes = bytes;
+        samples.push(d.as_secs_f64() * 1000.0);
+    }
+    samples.sort_by(f64::total_cmp);
+    let mean = samples.iter().sum::<f64>() / samples.len() as f64;
+    let median = samples[samples.len() / 2];
+    let best = samples[0];
+    println!("warm  : {runs} runs, {warm_bytes} bytes each");
+    for (i, s) in samples.iter().enumerate() {
+        println!("  run {i:>2}: {s:>8.1} ms");
+    }
+    println!("  median: {median:>8.1} ms   best: {best:>8.1} ms   mean: {mean:>8.1} ms");
+    println!();
+    println!(
+        "note: engine instances (and their loaded ONNX models) are cached for the\n\
+         module's lifetime — in sd_voicegarden, only the first utterance per\n\
+         model pays the cold cost."
+    );
+    Ok(())
+}
+
+fn cmd_migrate_models() -> Result<(), String> {
+    let cfg = ModuleConfig::load(None);
+    let primary = cfg.models_dir.clone();
+    std::fs::create_dir_all(&primary).map_err(|e| format!("{}: {e}", primary.display()))?;
+
+    let mut moved = 0usize;
+    for legacy in &cfg.legacy_models_dirs {
+        if legacy == &primary {
+            continue;
+        }
+        let Ok(entries) = std::fs::read_dir(legacy) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let src = entry.path();
+            let dst = primary.join(&name);
+            if !src.is_dir() || dst.exists() {
+                continue;
+            }
+            match std::fs::rename(&src, &dst) {
+                Ok(()) => {
+                    println!("  moved {} → {}", src.display(), dst.display());
+                    moved += 1;
+                }
+                Err(e) => eprintln!("  skipped {}: {e}", src.display()),
+            }
+        }
+    }
+    if moved == 0 {
+        println!("nothing to migrate — legacy directories are empty or already moved");
+    } else {
+        println!();
+        println!("migrated {moved} model(s) into {}", primary.display());
+        println!("restart speech-dispatcher to pick up the new locations");
+    }
+    Ok(())
 }
 
 fn write_wav_and_play(pcm: &[u8], rate: u32) -> Result<(), String> {

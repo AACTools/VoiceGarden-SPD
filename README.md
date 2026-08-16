@@ -12,7 +12,7 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 - **Word highlighting** — `<mark>` index marks (including speechd's own `__spd_N` pause marks) are mapped to engine word timings and reported in sync with playback: real timings for Azure/Edge/Google, estimated elsewhere. Verified end-to-end with a raw SSIP client (marks arrive as each word is spoken).
 - **Stop/pause/resume** — STOP lands within ~`ChunkMs` of audio; PAUSE aborts and speechd re-speaks from the pause mark on resume (same behaviour as stock modules)
 - **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper exactly as it does for VoiceGarden-SAPI on Windows. `<mark>` tags are timed by the module itself either way.
-- **Accessibility modes** — punctuation announcement (`some`/`most`/`all`), spelling mode, and capital-letter recognition are applied as text preprocessing (the engines don't implement them natively)
+- **Accessibility modes** — punctuation announcement (`some`/`most`/`all`), spelling mode, and capital-letter recognition. Spelling uses native SSML `<say-as interpret-as="characters">` on SSML-capable engines (Azure/Edge/Google) and a text approximation elsewhere; punctuation and capitals are applied as text preprocessing (the engines don't implement them natively)
 - **Sound icons** — `SOUND_ICON` messages play the named file from `SoundIconFolder` (Debian's `sound-icons` package provides the standard set), falling back to speaking the icon name
 - **No root needed** — the installer puts everything under `~/.local` and `~/.config`
 
@@ -54,13 +54,15 @@ voicegarden-spd status                    # installation + voice inventory
 voicegarden-spd install [--models-dir DIR]
 voicegarden-spd uninstall
 voicegarden-spd refresh [--config FILE]   # fetch cloud voice lists (network)
-voicegarden-spd voices                    # merged local + cloud voice list
+voicegarden-spd voices [--config FILE]    # merged local + cloud voice list
 voicegarden-spd speak <voice> "<text>"    # direct preview (bypasses speechd)
+voicegarden-spd bench <voice> [text] [N]  # cold/warm synthesis timings
+voicegarden-spd migrate-models            # move legacy model dirs to the primary path
 ```
 
 ### Voices
 
-**Local (sherpa-onnx).** Put models under `~/.rust-tts-wrapper/sherpaonnx/<model-id>/` (the layout used by VoiceGarden and rust-tts-wrapper tooling). Each model × speaker becomes a voice named `<model-id>#<speaker>`, e.g. `kokoro-en-v1.1-v0_19#1`.
+**Local (sherpa-onnx).** Models live in `~/.local/share/voicegarden/sherpa-onnx-models/<model-id>/` — one directory per model. The legacy rust-tts-wrapper layout (`~/.rust-tts-wrapper/sherpaonnx`) is still scanned as a fallback so existing installs keep working, and `voicegarden-spd migrate-models` moves them over. Each model × speaker becomes a voice named `<model-id>#<speaker>`, e.g. `kokoro-en-v1.1-v0_19#1`.
 
 **Cloud.** Write credentials to `~/.config/voicegarden-spd/engines.json` (mode 0600):
 
@@ -109,6 +111,18 @@ See [`config/voicegarden-spd.conf`](config/voicegarden-spd.conf): `ModelsDir`, `
 **Sherpa-onnx models.** Model licences vary per model and are tracked in the [sherpa-onnx-tts-models](https://github.com/AACTools/sherpa-onnx-tts-models) registry (`license` / `license_url` on every entry; surfaced through rust-tts-wrapper's `SherpaModelInfo`). Common families: Piper voices are mostly MIT/Apache-2.0 (per-voice training datasets may carry additional terms), Kokoro is Apache-2.0, MMS models are CC-BY-NC 4.0 (**non-commercial**), Matcha examples are mostly MIT. Users are responsible for checking a model's licence before use — `voicegarden-spd voices` output and the model registry are the source of truth.
 
 **Cloud engines.** Using a cloud voice sends your text to that provider; usage is subject to each provider's terms and privacy policy. Credentials are stored locally in `engines.json` (0600) and only leave the machine in API requests to the configured provider.
+
+## Performance
+
+Engine instances — and for sherpa-onnx, the loaded ONNX model — are cached for the module's lifetime. Only the **first utterance per model** pays the cold-start cost (model load + first inference); every subsequent utterance through the same voice is warm. Cloud engines pay one network round trip per utterance regardless.
+
+Measure it yourself:
+
+```bash
+voicegarden-spd bench piper-nl-rdh-low#0 "The quick brown fox jumps over the lazy dog." 5
+```
+
+CI runs the same bench on every push (informational; see the smoke job log). With `LOGLEVEL` set to 4+ in `speechd.conf`, the module logs the exact text each engine receives — handy when debugging preprocessing/passthrough.
 
 ## Development
 

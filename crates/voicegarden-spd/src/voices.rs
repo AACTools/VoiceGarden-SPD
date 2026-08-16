@@ -90,58 +90,60 @@ pub struct CachedVoice {
     pub lang: String,
 }
 
-/// Scan `models_dir` against the sherpa-onnx registry and produce one
-/// voice per (installed model × speaker).
-pub fn local_sherpa_voices(models_dir: &Path, num_threads: i32) -> Vec<VgVoice> {
-    let creds = serde_json::json!({
-        "modelPath": models_dir.to_string_lossy(),
-        "numThreads": num_threads,
-    })
-    .to_string();
-    let engine = SherpaOnnxEngine::new(&creds);
-    let registry = engine.available_models();
+/// Scan the model directories (primary first, then legacy fallbacks)
+/// against the sherpa-onnx registry and produce one voice per
+/// (installed model × speaker). A model found in an earlier directory
+/// wins; duplicates are skipped.
+pub fn local_sherpa_voices(models_dirs: &[std::path::PathBuf], num_threads: i32) -> Vec<VgVoice> {
+    let registry_engine = SherpaOnnxEngine::new("{}");
+    let registry = registry_engine.available_models();
 
     let mut voices = Vec::new();
-    let Ok(entries) = std::fs::read_dir(models_dir) else {
-        return voices;
-    };
-    for entry in entries.flatten() {
-        let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for models_dir in models_dirs {
+        let Ok(entries) = std::fs::read_dir(models_dir) else {
             continue;
         };
-        if !entry.path().is_dir() {
-            continue;
-        }
-        let Some(info) = registry.get(&id) else {
-            continue;
-        };
-        let lang = info
-            .language
-            .first()
-            .map(|l| l.lang_code.clone())
-            .unwrap_or_default();
-        let num_speakers = info.num_speakers.max(1);
-        for sid in 0..num_speakers {
-            voices.push(VgVoice {
-                spd_name: format!("{id}#{sid}"),
-                language: lang.clone(),
-                variant: String::new(),
-                engine_id: "sherpaonnx".into(),
-                engine_voice_id: sid.to_string(),
-                // SherpaOnnxEngine::new parses credentials as
-                // HashMap<String, String>, so every value must be a string
-                // (a JSON number makes the whole parse fail silently and
-                // the engine comes up with no model).
-                credentials: serde_json::json!({
-                    "modelPath": models_dir.to_string_lossy(),
-                    "modelId": id,
-                    "numThreads": num_threads.to_string(),
-                })
-                .to_string(),
-                sample_rate: Some(info.sample_rate),
-                pcm_rate: info.sample_rate,
-                ssml_capable: false,
-            });
+        for entry in entries.flatten() {
+            let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if !entry.path().is_dir() || !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(info) = registry.get(&id) else {
+                continue;
+            };
+            let lang = info
+                .language
+                .first()
+                .map(|l| l.lang_code.clone())
+                .unwrap_or_default();
+            let num_speakers = info.num_speakers.max(1);
+            for sid in 0..num_speakers {
+                voices.push(VgVoice {
+                    spd_name: format!("{id}#{sid}"),
+                    language: lang.clone(),
+                    variant: String::new(),
+                    engine_id: "sherpaonnx".into(),
+                    engine_voice_id: sid.to_string(),
+                    // SherpaOnnxEngine::new parses credentials as
+                    // HashMap<String, String>, so every value must be a
+                    // string (a JSON number makes the whole parse fail
+                    // silently and the engine comes up with no model).
+                    // modelPath points at the directory the model was
+                    // actually found in, so legacy layouts load in place.
+                    credentials: serde_json::json!({
+                        "modelPath": models_dir.to_string_lossy(),
+                        "modelId": id,
+                        "numThreads": num_threads.to_string(),
+                    })
+                    .to_string(),
+                    sample_rate: Some(info.sample_rate),
+                    pcm_rate: info.sample_rate,
+                    ssml_capable: false,
+                });
+            }
         }
     }
     voices
