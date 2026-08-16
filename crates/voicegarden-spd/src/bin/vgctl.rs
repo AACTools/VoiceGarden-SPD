@@ -52,6 +52,10 @@ fn main() -> ExitCode {
         "speak" => cmd_speak(&args[1..]),
         "bench" => cmd_bench(&args[1..]),
         "migrate-models" => cmd_migrate_models(),
+        // Internal helper for `doctor`: synthesise through one voice with
+        // no playback, so a crashing model kills only a child process
+        // (ONNX-runtime aborts cannot be caught in-process).
+        "check-model" => cmd_check_model(&args[1..]),
         "--help" | "-h" => {
             print!("{USAGE}");
             Ok(())
@@ -180,6 +184,111 @@ impl Doctor {
     }
     fn info(&mut self, label: &str, detail: &str) {
         println!("  [--]   {label}: {detail}");
+    }
+}
+
+/// Synthesise a short probe through one local voice, no playback.
+/// Prints `OK <bytes>` on success; any failure exits non-zero.
+/// Spawned as a subprocess by `doctor` — corrupt/unsupported ONNX models
+/// abort the process (uncatchable foreign exception), and a child exit
+/// code is the only reliable signal.
+fn cmd_check_model(args: &[String]) -> Result<(), String> {
+    let voice_name = args
+        .first()
+        .ok_or("usage: voicegarden-spd check-model <voice>")?
+        .clone();
+    let cfg = ModuleConfig::load(None);
+    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    let voice = local
+        .iter()
+        .find(|v| v.spd_name == voice_name)
+        .ok_or_else(|| format!("voice '{voice_name}' not found"))?
+        .clone();
+
+    let engine = rust_tts_wrapper::create_engine(&voice.engine_id, &voice.credentials)
+        .ok_or_else(|| format!("engine '{}' unavailable", voice.engine_id))?;
+    let mut total = 0usize;
+    engine
+        .speak_sync(
+            "one two three",
+            Some(&voice.engine_voice_id),
+            1.0,
+            1.0,
+            1.0,
+            Some(&mut |chunk: &[u8]| total += chunk.len()),
+            None,
+        )
+        .map_err(|e| format!("synthesis failed: {e}"))?;
+    if total == 0 {
+        return Err("synthesis produced no audio".into());
+    }
+    println!("OK {total}");
+    Ok(())
+}
+
+/// `doctor`'s per-model validation: spawn `check-model` for each distinct
+/// installed model and classify the outcome. Subprocess isolation means a
+/// corrupt model cannot take the doctor down with it.
+fn doctor_check_models(d: &mut Doctor, cfg: &ModuleConfig) {
+    use std::collections::BTreeSet;
+    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    // One check per distinct model (speaker #0).
+    let models: BTreeSet<String> = local
+        .iter()
+        .filter(|v| v.engine_voice_id == "0")
+        .map(|v| v.spd_name.clone())
+        .collect();
+    if models.is_empty() {
+        return; // the generic "voice availability" check covers empty setups
+    }
+    println!();
+    println!("  model load + synthesis checks (~2 s per model):");
+    let exe = std::env::current_exe().unwrap_or_else(|_| "voicegarden-spd".into());
+    for model in &models {
+        let out = std::process::Command::new(&exe)
+            .args(["check-model", model])
+            .output();
+        match out {
+            Ok(o) if o.status.success() => {
+                let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                println!("  [ok]   {model}: {stdout}");
+            }
+            Ok(o) => {
+                let code = o.status.code();
+                let signal = {
+                    #[cfg(unix)]
+                    {
+                        use std::os::unix::process::ExitStatusExt;
+                        o.status.signal()
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        None
+                    }
+                };
+                let detail =
+                    if signal.is_some() || matches!(code, Some(134) | Some(135) | Some(132)) {
+                        "ONNX runtime aborted — the model archive is corrupt, an \
+                     unsupported variant (e.g. fp16 on this runtime), or its files \
+                     are missing. Redownload the model or pick another variant; \
+                     every utterance through it will fail until then."
+                            .to_string()
+                    } else {
+                        let err = String::from_utf8_lossy(&o.stderr);
+                        format!(
+                            "check failed (exit {}): {}",
+                            code.map_or("killed by signal".to_string(), |c| c.to_string()),
+                            err.lines().last().unwrap_or("no detail")
+                        )
+                    };
+                println!("  [FAIL] {model}: {detail}");
+                d.failures += 1;
+            }
+            Err(e) => {
+                println!("  [FAIL] {model}: could not spawn check: {e}");
+                d.failures += 1;
+            }
+        }
     }
 }
 
@@ -315,6 +424,9 @@ fn cmd_doctor() -> Result<(), String> {
             "no voices at all — put a sherpa-onnx model under the models dir (README) or configure cloud credentials and run refresh",
         );
     }
+
+    // 4b. Per-model load + synthesis validation (subprocess-isolated).
+    doctor_check_models(&mut d, &cfg);
 
     // 5. Daemon-side check: can spd-say see the module?
     if sock_ok {
