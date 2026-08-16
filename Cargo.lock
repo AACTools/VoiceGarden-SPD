@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "0.1.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?rev=51d7d0b#51d7d0bd98c71e910b51040f99de398238d94ab5"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.3.17#2f570a218f7d8c1027a5869a50804047d087390a"
 dependencies = [
  "anyhow",
  "base64",
@@ -1703,7 +1703,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voicegarden-spd"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "cc",
  "libc",
