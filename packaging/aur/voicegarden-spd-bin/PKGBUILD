@@ -1,0 +1,44 @@
+# Maintainer: will wade <willwade@gmail.com>
+# Binary package: pulls the release tarball from GitHub releases.
+# Source package: voicegarden-spd-git (builds from git).
+
+pkgname=voicegarden-spd-bin
+pkgver=0.2.1
+pkgrel=1
+pkgdesc="Speech-dispatcher module: 1300+ sherpa-onnx local voices + 20 cloud engines for every speechd client"
+arch=('x86_64' 'aarch64')
+url="https://github.com/AACTools/VoiceGarden-SPD"
+license=('MIT')
+depends=('speech-dispatcher')
+optdepends=('sound-icons: named sound icons')
+provides=('voicegarden-spd')
+conflicts=('voicegarden-spd')
+source_x86_64=("${url}/releases/download/v${pkgver}/voicegarden-spd-v${pkgver}-x86_64-linux.tar.gz")
+source_aarch64=("${url}/releases/download/v${pkgver}/voicegarden-spd-v${pkgver}-aarch64-linux.tar.gz")
+# Regenerate: updpkgsums (or makepkg -g >> PKGBUILD)
+sha256sums_x86_64=('SKIP')
+sha256sums_aarch64=('SKIP')
+
+package() {
+    cd "${srcdir}/voicegarden-spd-v${pkgver}-${CARCH}-linux"
+
+    install -Dm755 sd_voicegarden \
+        "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden"
+    # Arch's speech-dispatcher looks in /usr/lib/speech-dispatcher-modules
+    # (no multiarch triplet); install there instead.
+    install -dm755 "${pkgdir}/usr/lib/speech-dispatcher-modules"
+    mv "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden" \
+       "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden"
+    rmdir -p "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules" 2>/dev/null || true
+
+    install -Dm755 voicegarden-spd-refresh \
+        "${pkgdir}/usr/lib/speech-dispatcher-modules/voicegarden-spd-refresh"
+    install -Dm755 voicegarden-spd "${pkgdir}/usr/bin/voicegarden-spd"
+    install -Dm644 voicegarden-spd.conf \
+        "${pkgdir}/etc/speech-dispatcher/modules/voicegarden-spd.conf"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+
+    # Register with the system speechd config on install (Arch ships it
+    # commented-out by default; append when missing).
+    install -Dm644 /dev/null "${pkgdir}/etc/speech-dispatcher/speechd.conf.d/voicegarden.conf"  2>/dev/null || true
+}

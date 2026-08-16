@@ -1,64 +1,144 @@
 #!/bin/sh
-# VoiceGarden-SPD installer — downloads the latest release and installs
-# the module user-locally (no root required).
+# VoiceGarden-SPD installer
 #
-# Usage:
 #   curl -fsSL https://raw.githubusercontent.com/AACTools/VoiceGarden-SPD/main/scripts/install.sh | sh
 #
-# Or from an extracted release tarball:
-#   ./install.sh
+# Strategy:
+#   1. Prefer a native package (.deb / .rpm) from the latest release —
+#      integrates with the package manager, handles upgrades + removal.
+#   2. Fall back to the user-local tarball install (no root) with --user
+#      or automatically when sudo is unavailable.
+#
+# Flags:
+#   --user     force the user-local (tarball) install even with root
+#   --version vX.Y.Z   install a specific release instead of latest
 set -eu
 
 REPO="AACTools/VoiceGarden-SPD"
 ARCH="$(uname -m)"
+WANT_USER=0
+VERSION="latest"
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        --user) WANT_USER=1; shift ;;
+        --version) VERSION="${2:?--version needs a value}"; shift 2 ;;
+        --version=*) VERSION="${1#--version=}"; shift ;;
+        -h|--help) sed -n '2,15p' "$0"; exit 0 ;;
+        *) echo "unknown argument: $1" >&2; exit 1 ;;
+    esac
+done
+
 case "$ARCH" in
-    x86_64) ARCH_DIR="x86_64-linux" ;;
-    aarch64|arm64) ARCH_DIR="aarch64-linux" ;;
-    *) echo "unsupported architecture: $ARCH (x86_64 and aarch64 builds coming; build from source for now)" >&2; exit 1 ;;
+    x86_64)  DEB_ARCH="amd64"; RPM_ARCH="x86_64"; TARBALL_ARCH="x86_64-linux" ;;
+    aarch64|arm64) DEB_ARCH="arm64"; RPM_ARCH="aarch64"; TARBALL_ARCH="aarch64-linux" ;;
+    *) echo "unsupported architecture: $ARCH — build from source: https://github.com/${REPO}#development" >&2; exit 1 ;;
 esac
 
-# Locate the tarball: bundled (running from an extracted release) or latest.
-if [ -f "$(dirname "$0")/sd_voicegarden" ]; then
-    echo "Installing from local directory $(dirname "$0")"
-    BIN_DIR="$(dirname "$0")"
-else
-    URL="https://github.com/${REPO}/releases/latest/download/voicegarden-spd-latest-${ARCH_DIR}.tar.gz"
-    TMP="$(mktemp -d)"
-    trap 'rm -rf "$TMP"' EXIT
-    echo "Downloading latest release for ${ARCH_DIR}…"
-    if ! curl -fsSL -o "$TMP/vg.tar.gz" "$URL"; then
-        # 'latest' alias may not exist; resolve the newest tagged asset.
-        TAG="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
-        [ -n "$TAG" ] || { echo "could not resolve latest release" >&2; exit 1; }
-        URL="https://github.com/${REPO}/releases/download/${TAG}/voicegarden-spd-${TAG}-${ARCH_DIR}.tar.gz"
-        curl -fsSL -o "$TMP/vg.tar.gz" "$URL"
+have() { command -v "$1" >/dev/null 2>&1; }
+
+need() {
+    for t in "$@"; do
+        have "$t" || { echo "this install path needs '$t' which was not found" >&2; return 1; }
+    done
+}
+
+resolve_tag() {
+    if [ "$VERSION" = "latest" ]; then
+        VERSION="$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')"
+        [ -n "$VERSION" ] || { echo "could not resolve latest release" >&2; exit 1; }
     fi
-    tar -xzf "$TMP/vg.tar.gz" -C "$TMP"
-    BIN_DIR="$(dirname "$(find "$TMP" -name sd_voicegarden | head -1)")"
+}
+
+download_release() { # $1 = filename
+    resolve_tag
+    curl -fsSL -o "$TMP/$1" "https://github.com/${REPO}/releases/download/${VERSION}/$1"
+}
+
+# ---- pick the install path -------------------------------------------------
+
+TMP="$(mktemp -d)"
+trap 'rm -rf "$TMP"' EXIT
+
+SUDO=""
+if [ "$(id -u)" != "0" ]; then
+    if have sudo; then SUDO="sudo"; fi
 fi
 
-# The management CLI does the install (copies to
-# ~/.local/libexec/speech-dispatcher-modules, writes config, registers the
-# AddModule line).
-if [ ! -x "$BIN_DIR/voicegarden-spd" ]; then
-    echo "voicegarden-spd management tool not found next to sd_voicegarden" >&2
-    exit 1
+can_root() { [ "$(id -u)" = "0" ] || have sudo; }
+
+install_deb() {
+    resolve_tag
+    file="voicegarden-spd_${VERSION#v}_${DEB_ARCH}.deb"
+    echo "Downloading ${file}…"
+    download_release "$file"
+    ($SUDO apt-get update -qq || true)
+    $SUDO apt-get install -y "$TMP/$file"
+}
+
+install_rpm() {
+    resolve_tag
+    file="voicegarden-spd-${VERSION#v}.${RPM_ARCH}.rpm"
+    echo "Downloading ${file}…"
+    download_release "$file"
+    if have dnf; then
+        ($SUDO dnf install -y "$TMP/$file")
+    elif have zypper; then
+        ($SUDO zypper --non-interactive install "$TMP/$file")
+    elif have rpm; then
+        $SUDO rpm -Uvh "$TMP/$file" || $SUDO rpm -ivh "$TMP/$file"
+    else
+        echo "no rpm installer available" >&2
+        return 1
+    fi
+}
+
+install_user_tarball() {
+    resolve_tag
+    file="voicegarden-spd-${VERSION}-${TARBALL_ARCH}.tar.gz"
+    echo "Downloading ${file}…"
+    if ! download_release "$file"; then
+        # older releases may lack the tag-named file; try the latest alias
+        curl -fsSL -o "$TMP/vg.tar.gz" \
+            "https://github.com/${REPO}/releases/latest/download/voicegarden-spd-latest-${TARBALL_ARCH}.tar.gz" \
+            || { echo "download failed" >&2; exit 1; }
+    fi
+    tar -xzf "$TMP/$file" -C "$TMP"
+    BIN_DIR="$(dirname "$(find "$TMP" -name sd_voicegarden -type f | head -1)")"
+    [ -x "$BIN_DIR/voicegarden-spd" ] || { echo "release tarball incomplete" >&2; exit 1; }
+    "$BIN_DIR/voicegarden-spd" install
+}
+
+PKG_OK=0
+if [ "$WANT_USER" = "0" ] && can_root; then
+    # Native package path (best integration: upgrades, clean removal)
+    if have apt-get; then
+        install_deb && PKG_OK=1
+    elif have dnf || have zypper || have rpm; then
+        install_rpm && PKG_OK=1
+    fi
 fi
-"$BIN_DIR/voicegarden-spd" install
+
+if [ "$PKG_OK" != "1" ]; then
+    if [ "$WANT_USER" = "0" ] && can_root; then
+        echo "falling back to user-local install (package path unavailable)"
+    fi
+    need curl || { echo "install requires curl" >&2; exit 1; }
+    install_user_tarball
+fi
 
 cat <<'EOF'
 
-VoiceGarden-SPD installed (user-local).
-
-Next:
-  1. Optional: add cloud engine credentials to
-       ~/.config/voicegarden-spd/engines.json        (mode 600)
-     then run:  voicegarden-spd refresh
-  2. Restart speech-dispatcher:
-       systemctl --user restart speech-dispatcher.socket
-     (or log out and back in)
-  3. Test:
+Done. To finish setup:
+  1. Restart speech-dispatcher (per user session):
+       systemctl --user restart speech-dispatcher.service
+  2. Test:
        spd-say -o voicegarden-spd "Hello from VoiceGarden"
+  3. Optional cloud voices:
+       ~/.config/voicegarden-spd/engines.json  (mode 600)
+       voicegarden-spd refresh
+  4. Troubleshooting: voicegarden-spd doctor
 
-Sherpa-onnx models: place them under ~/.rust-tts-wrapper/sherpaonnx/<model-id>/
+Local neural voices: models go in
+  ~/.local/share/voicegarden/sherpa-onnx-models/<model-id>/
 EOF

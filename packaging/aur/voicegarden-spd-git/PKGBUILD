@@ -1,0 +1,43 @@
+# Maintainer: will wade <willwade@gmail.com>
+# Source package: builds from the git default branch.
+
+pkgname=voicegarden-spd-git
+pkgver=0.2.1
+pkgrel=1
+pkgdesc="Speech-dispatcher module: 1300+ sherpa-onnx local voices + 20 cloud engines for every speechd client (git build)"
+arch=('x86_64' 'aarch64')
+url="https://github.com/AACTools/VoiceGarden-SPD"
+license=('MIT')
+depends=('speech-dispatcher')
+makedepends=('git' 'cargo' 'clang')
+optdepends=('sound-icons: named sound icons')
+provides=('voicegarden-spd')
+conflicts=('voicegarden-spd')
+source=("git+${url}.git#branch=main")
+sha256sums=('SKIP')
+
+pkgver() {
+    cd "${srcdir}/VoiceGarden-SPD"
+    git describe --tags --long 2>/dev/null | sed 's/^v//; s/-/.r/; s/-/./' \
+        || printf "0.2.1.r%s.g%s" "$(git rev-list --count HEAD)" "$(git rev-parse --short HEAD)"
+}
+
+build() {
+    cd "${srcdir}/VoiceGarden-SPD"
+    cargo build --release --locked
+}
+
+package() {
+    cd "${srcdir}/VoiceGarden-SPD"
+
+    install -dm755 "${pkgdir}/usr/lib/speech-dispatcher-modules"
+    install -Dm755 target/release/sd_voicegarden \
+        "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden"
+    install -Dm755 target/release/voicegarden-spd-refresh \
+        "${pkgdir}/usr/lib/speech-dispatcher-modules/voicegarden-spd-refresh"
+    install -Dm755 target/release/voicegarden-spd \
+        "${pkgdir}/usr/bin/voicegarden-spd"
+    install -Dm644 config/voicegarden-spd.conf \
+        "${pkgdir}/etc/speech-dispatcher/modules/voicegarden-spd.conf"
+    install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
+}

@@ -18,25 +18,44 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 
 ## Install
 
-### One-liner (release tarball)
+**Requires speech-dispatcher 0.12+** (Debian 13+, Ubuntu 25.04+, Fedora 41+, Arch, openSUSE Tumbleweed). On older releases the module loads but speech cannot play — `voicegarden-spd doctor` explains if you hit this.
+
+### One-liner (recommmended)
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AACTools/VoiceGarden-SPD/main/scripts/install.sh | sh
 ```
 
-This downloads the latest x86_64 release, installs to `~/.local/libexec/speech-dispatcher-modules`, writes `~/.config/speech-dispatcher/modules/voicegarden-spd.conf`, and adds the `AddModule` line to `~/.config/speech-dispatcher/speechd.conf`. aarch64: build from source (below) for now; packaged builds are on the roadmap.
-
-Then restart speech-dispatcher and test:
+With root this installs the native **.deb/.rpm** from the latest release (package-manager upgrades + clean removal, `--user` forces the no-root path instead). x86_64 and aarch64 (Raspberry Pi 4/5, ARM servers) are prebuilt. Then:
 
 ```bash
-systemctl --user restart speech-dispatcher.socket   # or re-login
-spd-say -o voicegarden-spd -L                       # list voices
+voicegarden-spd doctor    # verifies setup end-to-end, explains any problem
 spd-say -o voicegarden-spd "Hello from VoiceGarden"
 ```
 
+### Distro packages
+
+| Distro | Install |
+|---|---|
+| Debian/Ubuntu (0.12+ distros) | download the `.deb` from [releases](https://github.com/AACTools/VoiceGarden-SPD/releases), then `sudo apt install ./voicegarden-spd_*_amd64.deb` (or `_arm64.deb`) |
+| Fedora / openSUSE | download the `.rpm`, then `sudo dnf install ./voicegarden-spd-*.rpm` |
+| Arch | AUR: `voicegarden-spd-bin` (release) / `voicegarden-spd-git` (PKGBUILDs in [`packaging/aur/`](packaging/aur)) |
+
+The packages register the module system-wide (`/etc/speech-dispatcher`) and warn at install time if speech-dispatcher is older than 0.12.
+
+### User-local (no root)
+
+```bash
+curl -fsSL .../install.sh | sh -s -- --user
+# or from a checkout:
+./target/release/voicegarden-spd install
+```
+
+Installs to `~/.local/libexec/speech-dispatcher-modules`, writes `~/.config/speech-dispatcher/modules/voicegarden-spd.conf`, adds the `AddModule` line to your user `speechd.conf`, and restarts the daemon automatically (`--no-restart` to skip).
+
 ### From source
 
-Requires a C compiler (vendored protocol sources) and Rust ≥ 1.75; **runtime requires speech-dispatcher 0.12+** (Debian 13+, Ubuntu 25.04+, Fedora 41+, Arch, openSUSE Tumbleweed — server-side audio and the speak queue arrived in 0.12; on 0.11 distros the module loads but speech cannot play).
+Requires a C compiler (vendored protocol sources) and Rust ≥ 1.75.
 
 ```bash
 git clone https://github.com/AACTools/VoiceGarden-SPD
@@ -51,8 +70,9 @@ cargo build --release
 
 ```bash
 voicegarden-spd status                    # installation + voice inventory
-voicegarden-spd install [--models-dir DIR]
-voicegarden-spd uninstall
+voicegarden-spd doctor                    # diagnose a broken setup
+voicegarden-spd install [--models-dir DIR] [--no-restart]
+voicegarden-spd uninstall [--no-restart]
 voicegarden-spd refresh [--config FILE]   # fetch cloud voice lists (network)
 voicegarden-spd voices [--config FILE]    # merged local + cloud voice list
 voicegarden-spd speak <voice> "<text>"    # direct preview (bypasses speechd)
@@ -141,23 +161,23 @@ CI (`.github/workflows/ci.yml`): rustfmt + clippy + tests, plus a **real-speechd
 
 ### Releases
 
-Tags drive releases (`.github/workflows/release.yml`): the tag must match the workspace version in `Cargo.toml`; the build produces a tarball (`sd_voicegarden`, `voicegarden-spd-refresh`, `voicegarden-spd`, sample config, `install.sh`) attached to a GitHub Release, plus a stable `latest` tarball alias for the install one-liner.
+Tags drive releases (`.github/workflows/release.yml`): the tag must match the workspace version in `Cargo.toml`; each release publishes, for x86_64 and aarch64, a tarball + `.deb` + `.rpm` (plus a stable `latest` tarball alias for the install one-liner). A package smoke job installs the freshly built `.deb` on a clean runner and synthesises through a real speech-dispatcher before anything publishes. See [`docs/PUBLISHING.md`](docs/PUBLISHING.md) for the release process and AUR publishing steps.
 
 ```bash
 # release process
 $EDITOR Cargo.toml              # bump [workspace.package] version
-git commit -am "chore: release v0.1.0"
-git tag v0.1.0 && git push --tags
+git commit -am "chore: release v0.2.1"
+git tag v0.2.1 && git push --tags
 ```
 
 ## Roadmap
 
 - **GTK4/libadwaita configuration app** (VoiceGarden.UI's Linux counterpart): model browser/downloader with licence display, cloud credential editor, voice preview, engine toggles — on top of the same library calls the CLI uses
-- aarch64 release builds
+- Debian/Fedora official-repo packaging once there's a track record
 - Flatpak packaging of the config app (the module itself is inherently system-level: it must live outside the sandbox where speech-dispatcher can exec it)
-- Opt-in punctuation/spelling mode mapping
+- Opt-in punctuation/spelling mode localisation tables
 
-## Known limitations (v0.1)
+## Known limitations
 
 - Sherpa-ONNX synthesises whole clips before PCM flows (engine design), so its time-to-first-audio is inherent; cloud engines stream as bytes arrive.
 - Engines whose APIs return one JSON document with base64 audio (Google, ElevenLabs `with-timestamps`) can only deliver after the response completes — API limitation, not buffering.

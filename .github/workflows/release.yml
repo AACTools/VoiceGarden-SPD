@@ -9,8 +9,22 @@ permissions:
 
 jobs:
   build:
-    name: Build release artifacts
-    runs-on: ubuntu-22.04 # oldest supported glibc for broad distro compat
+    name: Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-22.04        # oldest widely-used glibc for compat
+            deb_arch: amd64
+            rpm_arch: x86_64
+            triplet: x86_64-linux-gnu
+          - arch: aarch64
+            runner: ubuntu-22.04-arm    # native arm64 runner (free, public repos)
+            deb_arch: arm64
+            rpm_arch: aarch64
+            triplet: aarch64-linux-gnu
     steps:
       - uses: actions/checkout@v4
 
@@ -32,7 +46,7 @@ jobs:
 
       - name: Assemble tarball
         run: |
-          DIR="voicegarden-spd-${GITHUB_REF_NAME}-x86_64-linux"
+          DIR="voicegarden-spd-${GITHUB_REF_NAME}-${{ matrix.arch }}-linux"
           mkdir -p "dist/$DIR"
           cp target/release/sd_voicegarden \
              target/release/voicegarden-spd-refresh \
@@ -43,32 +57,102 @@ jobs:
                    "dist/$DIR/voicegarden-spd-refresh" "dist/$DIR/voicegarden-spd"
           tar -C dist -czf "dist/${DIR}.tar.gz" "$DIR"
           # 'latest' alias so scripts/install.sh can use a stable URL.
-          cp "dist/${DIR}.tar.gz" "dist/voicegarden-spd-latest-x86_64-linux.tar.gz"
-          cp scripts/install.sh dist/install.sh
+          cp "dist/${DIR}.tar.gz" "dist/voicegarden-spd-latest-${{ matrix.arch }}-linux.tar.gz"
+          # staging dir for the packaging step
+          mkdir -p dist/bin
+          cp target/release/sd_voicegarden target/release/voicegarden-spd-refresh \
+             target/release/voicegarden-spd config/voicegarden-spd.conf dist/bin/
 
-      - name: Smoke-test the tarball binary
+      - name: Build .deb + .rpm (nfpm)
         run: |
-          dist/voicegarden-spd-${GITHUB_REF_NAME}-x86_64-linux/voicegarden-spd --version
+          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_$( \
+              case "$(uname -m)" in x86_64) echo x86_64;; aarch64) echo arm64;; esac \
+            )_Linux.tar.gz | tar -xz nfpm
+          chmod +x nfpm
+          ./packaging/build-packages.sh dist/bin "${GITHUB_REF_NAME#v}" \
+              "${{ matrix.deb_arch }}" "${{ matrix.rpm_arch }}" "${{ matrix.triplet }}" dist
+        env:
+          NFPM_DIR: ${{ github.workspace }}/.nfpm-home
+
+      - name: Smoke-test the built binaries
+        run: |
+          dist/bin/voicegarden-spd --version
+          dist/bin/sd_voicegarden </dev/null >/dev/null 2>&1 || [ $? -eq 2 ]
 
       - uses: actions/upload-artifact@v4
         with:
-          name: release-artifacts
+          name: release-artifacts-${{ matrix.arch }}
           path: dist/
+          retention-days: 3
+
+  test-deb:
+    name: Package smoke test (.deb, ${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86_64
+            runner: ubuntu-latest
+          - arch: aarch64
+            runner: ubuntu-latest-arm
+    steps:
+      - name: Install the .deb on this runner
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y speech-dispatcher curl bzip2 pulseaudio pulseaudio-utils
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-artifacts-${{ matrix.arch }}
+      - name: dpkg install
+        run: |
+          DEB=$(ls voicegarden-spd_*_${{ matrix.arch == 'x86_64' && 'amd64' || 'arm64' }}.deb)
+          sudo apt-get install -y "./$DEB"
+          dpkg -L voicegarden-spd | grep -E 'sd_voicegarden|voicegarden-spd$|modules/voicegarden-spd.conf'
+          voicegarden-spd --version
+      - name: Register user config + end-to-end speak
+        env:
+          XDG_RUNTIME_DIR: /tmp/xdg
+        run: |
+          mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
+          pulseaudio -D --exit-idle-time=-1 2>&1 || true
+          sleep 1
+          pactl load-module module-null-sink || true
+          mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
+          touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
+          speech-dispatcher --spawn || true
+          sleep 2
+          spd-say -o voicegarden-spd -L | grep -q piper-nl-rdh-low#0
+          cd ~/.rust-tts-wrapper/sherpaonnx
+          curl -fsSL -o p.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2
+          tar -xjf p.tar.bz2 -C piper-nl-rdh-low --strip-components=1
+          spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."
+      - name: doctor (post-install diagnostics)
+        run: voicegarden-spd doctor || true
+      - name: clean removal
+        run: sudo apt-get remove -y voicegarden-spd && ! dpkg -l voicegarden-spd | grep -q '^ii'
 
   publish:
     name: Publish GitHub release
     runs-on: ubuntu-latest
-    needs: build
+    needs: [build, test-deb]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
-          name: release-artifacts
+          pattern: release-artifacts-*
+          merge-multiple: true
           path: dist
+      - name: Collect release files
+        run: |
+          cp scripts/install.sh dist/install.sh
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           files: |
             dist/*.tar.gz
+            dist/*.deb
+            dist/*.rpm
             dist/install.sh

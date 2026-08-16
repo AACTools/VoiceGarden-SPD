@@ -1,0 +1,48 @@
+#!/bin/sh
+# postinst — register the module with the system speech-dispatcher config.
+#
+# Used by both .deb and .rpm (nfpm postinstall). POSIX sh only.
+#
+# VGSPD_CONF overrides the config path (used by the repo's tests to
+# verify this script without touching the real /etc).
+
+set -e
+
+CONF="${VGSPD_CONF:-/etc/speech-dispatcher/speechd.conf}"
+LINE='AddModule "voicegarden-spd" "sd_voicegarden" "voicegarden-spd.conf"'
+
+if [ -f "$CONF" ]; then
+    if ! grep -q 'AddModule "voicegarden-spd"' "$CONF" 2>/dev/null; then
+        printf '%s\n' "$LINE" >> "$CONF"
+        echo "voicegarden-spd: registered module in $CONF"
+    fi
+else
+    echo "voicegarden-spd: $CONF not found (speech-dispatcher not configured yet?);" \
+         "add this line once it exists:" >&2
+    echo "  $LINE" >&2
+fi
+
+# speech-dispatcher >= 0.12 is required (server-side audio + speak queue).
+# Warn loudly rather than hard-depend so users on older distros get an
+# actionable message instead of a silent runtime failure.
+if command -v speech-dispatcher >/dev/null 2>&1; then
+    version=$(speech-dispatcher --version 2>/dev/null | head -n1 | awk '{print $2}')
+    if [ -n "$version" ]; then
+        major=$(printf '%s' "$version" | cut -d. -f1)
+        minor=$(printf '%s' "$version" | cut -d. -f2)
+        if [ "$(printf '%02d%02d' "${major:-0}" "${minor:-0}")" -lt 0012 ]; then
+            echo "voicegarden-spd: WARNING speech-dispatcher $version is installed but" >&2
+            echo "  0.12+ is required (server-side audio). The module will load but" >&2
+            echo "  speech cannot play. Upgrade speech-dispatcher (e.g. Debian trixie," >&2
+            echo "  Ubuntu 25.04+, Fedora 41+), or remove this package." >&2
+        fi
+    fi
+fi
+
+echo
+echo "Restart speech-dispatcher to activate (per user session):"
+echo "  systemctl --user restart speech-dispatcher.service"
+echo "or log out and back in. Then: spd-say -o voicegarden-spd \"Hello\""
+echo "Troubleshooting: voicegarden-spd doctor"
+
+exit 0

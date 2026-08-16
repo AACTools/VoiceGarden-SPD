@@ -15,14 +15,16 @@ const USAGE: &str = "\
 voicegarden-spd — manage the VoiceGarden speech-dispatcher module
 
 Usage:
-  voicegarden-spd install [--models-dir DIR]   Install module + register (user-local, no root)
-  voicegarden-spd uninstall                   Remove installed files + registration
-  voicegarden-spd status                      Installation + voice inventory
-  voicegarden-spd refresh [--config FILE]     Refresh the cloud voice cache
-  voicegarden-spd voices [--config FILE]      List all merged voices
-  voicegarden-spd speak <voice> <text>        Speak once through rust-tts-wrapper directly
-  voicegarden-spd bench <voice> [text] [N]    Cold + warm synthesis timings (no playback)
-  voicegarden-spd migrate-models              Move legacy models into the primary models dir
+  voicegarden-spd install [--models-dir DIR] [--no-restart]
+                                            Install module + register (user-local, no root)
+  voicegarden-spd uninstall [--no-restart]  Remove installed files + registration
+  voicegarden-spd status                    Installation + voice inventory
+  voicegarden-spd doctor                    Diagnose a broken setup
+  voicegarden-spd refresh [--config FILE]   Refresh the cloud voice cache
+  voicegarden-spd voices [--config FILE]    List all merged voices
+  voicegarden-spd speak <voice> <text>      Speak once through rust-tts-wrapper directly
+  voicegarden-spd bench <voice> [text] [N]  Cold + warm synthesis timings (no playback)
+  voicegarden-spd migrate-models            Move legacy models into the primary models dir
   voicegarden-spd --version
 
 Environment:
@@ -42,8 +44,9 @@ fn main() -> ExitCode {
             Ok(())
         }
         "install" => cmd_install(&args[1..]),
-        "uninstall" => cmd_uninstall(),
+        "uninstall" => cmd_uninstall(&args[1..]),
         "status" => cmd_status(),
+        "doctor" => cmd_doctor(),
         "refresh" => cmd_refresh(&args[1..]),
         "voices" => cmd_voices(&args[1..]),
         "speak" => cmd_speak(&args[1..]),
@@ -92,6 +95,7 @@ fn find_binary(name: &str) -> Result<PathBuf, String> {
 
 fn cmd_install(args: &[String]) -> Result<(), String> {
     let mut models_dir = None;
+    let mut restart = true;
     let mut i = 0;
     while i < args.len() {
         match args[i].as_str() {
@@ -99,6 +103,7 @@ fn cmd_install(args: &[String]) -> Result<(), String> {
                 i += 1;
                 models_dir = Some(args.get(i).ok_or("--models-dir requires a value")?.clone());
             }
+            "--no-restart" => restart = false,
             other => return Err(format!("unknown argument: {other}")),
         }
         i += 1;
@@ -110,15 +115,21 @@ fn cmd_install(args: &[String]) -> Result<(), String> {
     for s in &steps {
         println!("  {s}");
     }
+    if restart && restart_speechd() {
+        println!("  restarted speech-dispatcher");
+    } else if restart {
+        println!();
+        println!("Restart speech-dispatcher to activate:");
+        println!("  systemctl --user restart speech-dispatcher.service  (or re-login)");
+    }
     println!();
-    println!("Done. Next steps:");
-    println!("  1. voicegarden-spd refresh        (fetch cloud voices — optional)");
-    println!("  2. systemctl --user restart speech-dispatcher.socket  (or re-login)");
-    println!("  3. spd-say -o voicegarden-spd \"Hello from VoiceGarden\"");
+    println!("Test:  spd-say -o voicegarden-spd \"Hello from VoiceGarden\"");
+    println!("Setup: voicegarden-spd doctor   (troubleshooting)");
     Ok(())
 }
 
-fn cmd_uninstall() -> Result<(), String> {
+fn cmd_uninstall(args: &[String]) -> Result<(), String> {
+    let restart = !args.iter().any(|a| a == "--no-restart");
     let steps = installer::uninstall()?;
     if steps.is_empty() {
         println!("nothing installed — no changes made");
@@ -126,8 +137,232 @@ fn cmd_uninstall() -> Result<(), String> {
     for s in &steps {
         println!("  {s}");
     }
-    println!("Restart speech-dispatcher for the change to take effect.");
+    if restart {
+        restart_speechd();
+    }
     Ok(())
+}
+
+/// Restart the user's speech-dispatcher so config changes take effect.
+/// Returns true when a restart was actually performed.
+fn restart_speechd() -> bool {
+    let status = std::process::Command::new("systemctl")
+        .args(["--user", "is-active", "speech-dispatcher.service"])
+        .output();
+    let active = status
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim() == "active")
+        .unwrap_or(false);
+    if !active {
+        // Not running inside a user session (root install, SSH without
+        // linger): the daemon starts on the user's next login anyway.
+        return false;
+    }
+    std::process::Command::new("systemctl")
+        .args(["--user", "restart", "speech-dispatcher.service"])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Numbered check-list output helper.
+struct Doctor {
+    failures: usize,
+}
+
+impl Doctor {
+    fn check(&mut self, ok: bool, label: &str, detail_ok: &str, detail_bad: &str) {
+        if ok {
+            println!("  [ok]   {label}: {detail_ok}");
+        } else {
+            println!("  [FAIL] {label}: {detail_bad}");
+            self.failures += 1;
+        }
+    }
+    fn info(&mut self, label: &str, detail: &str) {
+        println!("  [--]   {label}: {detail}");
+    }
+}
+
+fn cmd_doctor() -> Result<(), String> {
+    println!("voicegarden-spd {} — doctor", env!("CARGO_PKG_VERSION"));
+    println!();
+    let mut d = Doctor { failures: 0 };
+
+    // 1. Is speech-dispatcher installed and new enough?
+    // ("speech-dispatcher 0.12.1" — first line of --version stdout)
+    let sd_version = std::process::Command::new("speech-dispatcher")
+        .arg("--version")
+        .output()
+        .ok()
+        .and_then(|o| {
+            let text = String::from_utf8_lossy(&o.stdout);
+            text.lines().next().and_then(|l| {
+                l.split_whitespace()
+                    .find(|t| t.chars().next().is_some_and(char::is_numeric))
+                    .map(str::to_string)
+            })
+        })
+        .unwrap_or_default();
+    let sd_installed = !sd_version.is_empty();
+    if !sd_installed {
+        d.check(
+            false,
+            "speech-dispatcher",
+            "",
+            "not found — install your distro's speech-dispatcher package first",
+        );
+    } else {
+        let ok = version_at_least(&sd_version, 0, 12);
+        d.check(
+            ok,
+            "speech-dispatcher version",
+            &sd_version,
+            &format!(
+                "{sd_version} — 0.12+ required (server-side audio). Debian 13/Ubuntu 25.04/Fedora 41+ ship it; older releases cannot play module audio"
+            ),
+        );
+    }
+
+    // 2. Is the daemon reachable?
+    let uid = unsafe { libc::getuid() };
+    let sock = std::path::Path::new("/run/user")
+        .join(uid.to_string())
+        .join("speech-dispatcher/speechd.sock");
+    let sock_ok = sock.exists();
+    if sd_installed {
+        d.check(
+            sock_ok,
+            "daemon socket",
+            &sock.display().to_string(),
+            "not found — start it: systemctl --user start speech-dispatcher.socket, or open a desktop session",
+        );
+    }
+
+    // 3. Module binary + registration
+    let module_paths = [
+        installer::user_module_dir().join("sd_voicegarden"),
+        std::path::PathBuf::from(
+            "/usr/lib/x86_64-linux-gnu/speech-dispatcher-modules/sd_voicegarden",
+        ),
+        std::path::PathBuf::from(
+            "/usr/lib/aarch64-linux-gnu/speech-dispatcher-modules/sd_voicegarden",
+        ),
+        std::path::PathBuf::from("/usr/lib64/speech-dispatcher-modules/sd_voicegarden"),
+    ];
+    let module_path = module_paths.iter().find(|p| p.exists());
+    d.check(
+        module_path.is_some(),
+        "module binary",
+        &module_path.map_or(String::new(), |p| p.display().to_string()),
+        "not found — run `voicegarden-spd install` (user-local) or install the .deb/.rpm",
+    );
+
+    let speechd_conf = installer::user_speechd_config_dir().join("speechd.conf");
+    let registered = |p: &std::path::Path| {
+        std::fs::read_to_string(p).map(|t| {
+            t.lines()
+                .any(|l| l.contains("AddModule") && l.contains("\"voicegarden-spd\""))
+        })
+    };
+    let (reg_user, reg_system) = (
+        registered(&speechd_conf).unwrap_or(false),
+        registered(std::path::Path::new("/etc/speech-dispatcher/speechd.conf")).unwrap_or(false),
+    );
+    if reg_user || reg_system {
+        let where_ = if reg_user {
+            speechd_conf.display().to_string()
+        } else {
+            "/etc/speech-dispatcher/speechd.conf".to_string()
+        };
+        d.check(true, "registration", &format!("AddModule in {where_}"), "");
+    } else {
+        d.check(
+            false,
+            "registration",
+            "",
+            &format!(
+                "no AddModule line in {} or /etc/speech-dispatcher/speechd.conf — run `voicegarden-spd install` or reinstall the package",
+                speechd_conf.display()
+            ),
+        );
+    }
+
+    // 4. Voice inventory
+    let cfg = ModuleConfig::load(None);
+    let local = voicegarden_spd::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    let credentials = voicegarden_spd::voices::load_credentials(&cfg.credentials_file);
+    let cache = voicegarden_spd::voices::load_voice_cache(&cfg.voice_cache_file);
+    let cloud = voicegarden_spd::voices::cloud_voices(&cache, &credentials);
+    d.info(
+        "voices",
+        &format!(
+            "{} local ({}), {} cloud{}",
+            local.len(),
+            cfg.models_dir.display(),
+            cloud.len(),
+            if cloud.is_empty() {
+                " (run `voicegarden-spd refresh` for cloud voices)"
+            } else {
+                ""
+            }
+        ),
+    );
+    if local.is_empty() && cloud.is_empty() {
+        d.check(
+            false,
+            "voice availability",
+            "",
+            "no voices at all — put a sherpa-onnx model under the models dir (README) or configure cloud credentials and run refresh",
+        );
+    }
+
+    // 5. Daemon-side check: can spd-say see the module?
+    if sock_ok {
+        match std::process::Command::new("spd-say")
+            .args(["-o", "voicegarden-spd", "-L"])
+            .output()
+        {
+            Ok(o) if o.status.success() => {
+                let n = String::from_utf8_lossy(&o.stdout)
+                    .lines()
+                    .count()
+                    .saturating_sub(1);
+                d.check(
+                    true,
+                    "daemon view (spd-say -o voicegarden-spd -L)",
+                    &format!("{n} voices"),
+                    "",
+                );
+            }
+            _ => {
+                d.check(
+                    false,
+                    "daemon view (spd-say -o voicegarden-spd -L)",
+                    "",
+                    &format!(
+                        "spd-say failed — inspect /run/user/{uid}/speech-dispatcher/log/voicegarden-spd.log and speech-dispatcher.log"
+                    ),
+                );
+            }
+        }
+    }
+
+    println!();
+    if d.failures == 0 {
+        println!("All checks passed.");
+    } else {
+        println!("{} problem(s) found — see above.", d.failures);
+    }
+    println!("Module log: /run/user/{uid}/speech-dispatcher/log/voicegarden-spd.log");
+    Ok(())
+}
+
+/// Parse a `0.12.1`-style version and compare against (major, minor).
+fn version_at_least(v: &str, major: u32, minor: u32) -> bool {
+    let mut it = v.split('.');
+    let maj: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let min: u32 = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+    (maj, min) >= (major, minor)
 }
 
 fn cmd_status() -> Result<(), String> {
