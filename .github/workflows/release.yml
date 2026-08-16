@@ -124,6 +124,14 @@ jobs:
           voicegarden-spd --version
       - name: End-to-end speak
         run: |
+          dump_logs() {
+            echo "=== speechd logs on failure ==="
+            for f in "$XDG_RUNTIME_DIR"/speech-dispatcher/log/*.log /root/.cache/speech-dispatcher/log/*.log; do
+              [ -f "$f" ] && { echo "--- $f"; tail -n 40 "$f"; }
+            done
+            true
+          }
+          trap 'dump_logs' EXIT
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           pulseaudio -D --exit-idle-time=-1 --disallow-exit 2>&1 || true
           sleep 1
@@ -133,16 +141,14 @@ jobs:
           touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
           speech-dispatcher --spawn || true
           sleep 2
-          spd-say -o voicegarden-spd -L | grep -q piper-nl-rdh-low#0
+          spd-say -o voicegarden-spd -L > /tmp/voices.txt || { cat /tmp/voices.txt; exit 1; }
+          cat /tmp/voices.txt
+          grep -q piper-nl-rdh-low#0 /tmp/voices.txt
           cd ~/.rust-tts-wrapper/sherpaonnx
           curl -fsSL -o p.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2
           tar -xjf p.tar.bz2 -C piper-nl-rdh-low --strip-components=1
-          if ! spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."; then
-            echo "=== speechd logs on failure ==="
-            tail -n 40 "$XDG_RUNTIME_DIR"/speech-dispatcher/log/*.log 2>/dev/null || true
-            tail -n 40 /root/.cache/speech-dispatcher/log/*.log 2>/dev/null || true
-            exit 1
-          fi
+          spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."
+          trap - EXIT
       - name: doctor (post-install diagnostics)
         run: voicegarden-spd doctor || true
       - name: clean removal
