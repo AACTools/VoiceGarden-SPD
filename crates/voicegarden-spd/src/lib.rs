@@ -14,8 +14,10 @@
 pub mod callbacks;
 pub mod config;
 pub mod glue;
+pub mod icons;
 pub mod installer;
 pub mod pipeline;
+pub mod preprocess;
 pub mod refresh;
 pub mod ssml;
 pub mod voices;

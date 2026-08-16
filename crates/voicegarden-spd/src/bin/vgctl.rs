@@ -64,27 +64,18 @@ fn main() -> ExitCode {
     }
 }
 
-/// Locate our own binaries: installed copy first, then beside this
-/// executable (release tarball layout), then target/release (dev).
+/// Locate our own binaries: beside this executable first (release
+/// tarball / target layout — what `install` should deploy), then the
+/// installed copy (re-registration), so re-installing over an existing
+/// install never copies the old binary onto itself.
 fn find_binary(name: &str) -> Result<PathBuf, String> {
-    let candidates = [
-        installer::user_module_dir().join(name),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| p.parent().map(|d| d.join(name)))
-            .unwrap_or_default(),
-        std::env::current_exe()
-            .ok()
-            .and_then(|p| {
-                p.parent()
-                    .and_then(|d| d.parent())
-                    .map(|d| d.join("sd_voicegarden"))
-            })
-            .filter(|_| name == "sd_voicegarden")
-            .unwrap_or_default(),
-    ];
+    let exe_dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.join(name)));
+    let candidates = [exe_dir, Some(installer::user_module_dir().join(name))];
     candidates
         .iter()
+        .flatten()
         .find(|p| p.is_file())
         .cloned()
         .ok_or_else(|| {

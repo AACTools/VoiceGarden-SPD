@@ -17,46 +17,112 @@ pub struct SsmlMark {
     pub byte_offset: usize,
 }
 
-/// Strip SSML/XML tags from `input`, collapsing whitespace runs to single
-/// spaces, returning the cleaned text plus every `<mark>` found along the
-/// way, positioned at its byte offset in the cleaned text.
-pub fn strip_ssml_with_marks(input: &str) -> (String, Vec<SsmlMark>) {
-    let mut out = String::with_capacity(input.len());
+/// Fully-processed incoming message.
+#[derive(Debug, Clone, Default)]
+pub struct ProcessedText {
+    /// Plain text with all tags stripped and whitespace collapsed — used
+    /// for word timing and mark positioning.
+    pub plain: String,
+    /// Recovered `<mark>` entries, byte-offset into `plain`.
+    pub marks: Vec<SsmlMark>,
+    /// Input with **only** `<mark>` tags removed (all other SSML kept),
+    /// when the input contained any tag; `None` for plain text. Engines
+    /// that accept SSML (azure/edge/google) speak this verbatim — the
+    /// crate detects the `<speak>` prefix and passes it through, and
+    /// converts SpeechMarkdown inside `speak()` the same way.
+    pub ssml: Option<String>,
+}
+
+/// Full processing: plain text + marks for timing, mark-stripped SSML for
+/// passthrough-capable engines.
+#[must_use]
+pub fn process(input: &str) -> ProcessedText {
+    let has_tags = input.contains('<');
+    if !has_tags {
+        return ProcessedText {
+            plain: collapse_whitespace(input),
+            marks: Vec::new(),
+            ssml: None,
+        };
+    }
+
+    let mut plain = String::with_capacity(input.len());
+    let mut ssml = String::with_capacity(input.len());
     let mut marks = Vec::new();
 
     let bytes = input.as_bytes();
     let mut i = 0usize;
     while i < bytes.len() {
         if bytes[i] == b'<' {
-            // Find the end of the tag, tolerating quoted '>' characters.
             let Some((tag_end, tag)) = scan_tag(input, i) else {
-                // Unterminated '<' — emit it literally.
-                out.push('<');
+                plain.push('<');
+                ssml.push('<');
                 i += 1;
                 continue;
             };
             if let Some(name) = mark_name(tag) {
+                // Marks never reach the engine: we own their timing.
                 marks.push(SsmlMark {
                     name,
-                    byte_offset: out.len(),
+                    byte_offset: plain.len(),
                 });
+            } else {
+                ssml.push_str(tag);
             }
             i = tag_end;
         } else {
             let ch = input[i..].chars().next().expect("char at boundary");
             if ch.is_whitespace() {
-                // Collapse whitespace runs so tag removal doesn't leave
-                // double spaces; offsets stay consistent with the output.
-                if !out.ends_with(|c: char| c.is_whitespace()) {
-                    out.push(' ');
+                if !plain.ends_with(|c: char| c.is_whitespace()) {
+                    plain.push(' ');
+                }
+                if !ssml.ends_with(|c: char| c.is_whitespace()) {
+                    ssml.push(' ');
                 }
             } else {
-                out.push(ch);
+                plain.push(ch);
+                ssml.push(ch);
             }
             i += ch.len_utf8();
         }
     }
-    (out, marks)
+    ProcessedText {
+        plain,
+        marks,
+        ssml: Some(ssml),
+    }
+}
+
+/// Collapse whitespace runs to single spaces.
+fn collapse_whitespace(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    for ch in input.chars() {
+        if ch.is_whitespace() {
+            if !out.ends_on_space() {
+                out.push(' ');
+            }
+        } else {
+            out.push(ch);
+        }
+    }
+    out
+}
+
+trait EndsOnSpace {
+    fn ends_on_space(&self) -> bool;
+}
+impl EndsOnSpace for String {
+    fn ends_on_space(&self) -> bool {
+        self.ends_with(|c: char| c.is_whitespace())
+    }
+}
+
+/// Strip SSML/XML tags from `input`, collapsing whitespace runs to single
+/// spaces, returning the cleaned text plus every `<mark>` found along the
+/// way, positioned at its byte offset in the cleaned text.
+pub fn strip_ssml_with_marks(input: &str) -> (String, Vec<SsmlMark>) {
+    let p = process(input);
+    (p.plain, p.marks)
 }
 
 /// Plain-text view with tags removed and no mark extraction.

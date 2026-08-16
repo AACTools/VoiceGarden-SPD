@@ -182,13 +182,19 @@ enum Msg {
 /// when synthesis fails (a failed utterance is just silent). On abort
 /// (STOP/PAUSE) remaining audio is dropped.
 ///
+/// * `synth_text` — what the engine receives (may be SSML for
+///   passthrough-capable engines; timing marks are stripped from it).
+/// * `timing_text` — plain text the mark byte-offsets refer to; also the
+///   basis for word/timing alignment.
+///
 /// `poll` is invoked regularly while waiting for the worker — in
 /// production it pumps `module_process(0)` so STOP/PAUSE are honoured.
 #[allow(clippy::too_many_arguments)]
 pub fn speak(
     engine: Arc<dyn TtsEngine>,
     voice: &VgVoice,
-    text: &str,
+    synth_text: &str,
+    timing_text: &str,
     prosody: Prosody,
     marks: &[SsmlMark],
     chunk_ms: u32,
@@ -197,17 +203,56 @@ pub fn speak(
 ) -> Outcome {
     unsafe { glue::module_report_event_begin() };
     let outcome = speak_inner(
-        &engine, voice, text, prosody, marks, chunk_ms, stop_flag, poll,
+        &engine,
+        voice,
+        synth_text,
+        timing_text,
+        prosody,
+        marks,
+        chunk_ms,
+        stop_flag,
+        poll,
     );
     unsafe { glue::module_report_event_end() };
     outcome
+}
+
+/// Stream pre-decoded PCM16 mono (sound icons) with begin/end events.
+///
+/// No `706 ICON` is reported: the server treats 706 as "play this file
+/// yourself" (speak_queue_send_file_to_audio) — since we already stream
+/// the PCM inline, reporting it would double-play every icon.
+pub fn stream_raw_pcm(
+    samples: &[i16],
+    sample_rate: u32,
+    chunk_ms: u32,
+    stop_flag: &Arc<AtomicBool>,
+    poll: &dyn Fn(),
+) -> Outcome {
+    unsafe { glue::module_report_event_begin() };
+    let per_chunk =
+        ((u64::from(sample_rate.max(1)) * u64::from(chunk_ms) / 1000).max(1) as usize).max(1);
+    let mut sent = 0usize;
+    while sent < samples.len() && !stop_flag.load(Ordering::SeqCst) {
+        let end = (sent + per_chunk).min(samples.len());
+        send_pcm(&samples[sent..end], sample_rate);
+        sent = end;
+        poll();
+    }
+    unsafe { glue::module_report_event_end() };
+    if sent >= samples.len() {
+        Outcome::Completed
+    } else {
+        Outcome::Aborted
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
 fn speak_inner(
     engine: &Arc<dyn TtsEngine>,
     voice: &VgVoice,
-    text: &str,
+    synth_text: &str,
+    timing_text: &str,
     prosody: Prosody,
     marks: &[SsmlMark],
     chunk_ms: u32,
@@ -216,7 +261,7 @@ fn speak_inner(
 ) -> Outcome {
     let (tx, rx) = mpsc::channel::<Msg>();
     let voice_id = voice.engine_voice_id.clone();
-    let text_owned = text.to_string();
+    let text_owned = synth_text.to_string();
 
     let worker = std::thread::Builder::new().name("vg-synth".into()).spawn({
         let engine = Arc::clone(engine);
@@ -269,9 +314,9 @@ fn speak_inner(
         1.0
     };
 
-    let words = word_spans(text);
+    let words = word_spans(timing_text);
     let samples_per_chunk = ((u64::from(rate) * u64::from(chunk_ms) / 1000).max(1) as usize).max(1);
-    let mut pending: Vec<u16> = Vec::new(); // leftover PCM between chunks
+    let mut pending: Vec<i16> = Vec::new(); // leftover PCM between chunks
     let mut boundaries: Vec<Boundary> = Vec::new();
     let mut next_mark = 0usize; // marks fire in document order
     let mut sent_secs = 0.0f32;
@@ -297,7 +342,7 @@ fn speak_inner(
 
         // Stream whatever a full chunk allows while data keeps flowing.
         while pending.len() >= samples_per_chunk && !stop_flag.load(Ordering::SeqCst) {
-            let chunk: Vec<u16> = pending.drain(..samples_per_chunk).collect();
+            let chunk: Vec<i16> = pending.drain(..samples_per_chunk).collect();
             send_pcm(&chunk, rate);
             #[allow(clippy::cast_precision_loss)]
             {
@@ -347,7 +392,7 @@ fn speak_inner(
     if !stop_flag.load(Ordering::SeqCst) {
         while !pending.is_empty() {
             let take = pending.len().min(samples_per_chunk);
-            let chunk: Vec<u16> = pending.drain(..take).collect();
+            let chunk: Vec<i16> = pending.drain(..take).collect();
             send_pcm(&chunk, rate);
         }
         let _ = sent_secs; // audio position no longer needed once flushing
@@ -398,7 +443,7 @@ fn report_mark(name: &str) {
 }
 
 /// Send one PCM16 mono chunk to the speech-dispatcher server.
-fn send_pcm(chunk: &[u16], rate: u32) {
+fn send_pcm(chunk: &[i16], rate: u32) {
     let track = AudioTrack {
         bits: 16,
         num_channels: 1,
@@ -409,11 +454,11 @@ fn send_pcm(chunk: &[u16], rate: u32) {
     unsafe { glue::module_tts_output_server(&track, SPD_AUDIO_LE) };
 }
 
-/// Append little-endian PCM16 bytes to a `Vec<u16>`.
-fn append_le_bytes(pcm: &mut Vec<u16>, bytes: &[u8]) {
+/// Append little-endian PCM16 bytes to a `Vec<i16>`.
+fn append_le_bytes(pcm: &mut Vec<i16>, bytes: &[u8]) {
     pcm.reserve(bytes.len() / 2);
     for pair in bytes.chunks_exact(2) {
-        pcm.push(u16::from_le_bytes([pair[0], pair[1]]));
+        pcm.push(i16::from_le_bytes([pair[0], pair[1]]));
     }
 }
 
@@ -549,6 +594,6 @@ mod tests {
     fn append_le_bytes_pairs() {
         let mut pcm = Vec::new();
         append_le_bytes(&mut pcm, &[0x01, 0x00, 0xFF, 0xFF, 0x00]);
-        assert_eq!(pcm, vec![1, 65535]);
+        assert_eq!(pcm, vec![1, -1]);
     }
 }

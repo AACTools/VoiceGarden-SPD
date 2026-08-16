@@ -11,6 +11,9 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 - **Streaming audio** — cloud PCM is handed to the speech-dispatcher server as chunks arrive from the network (rust-tts-wrapper decodes MP3 incrementally); sherpa-onnx synthesises whole clips by design, then streams them to the server
 - **Word highlighting** — `<mark>` index marks (including speechd's own `__spd_N` pause marks) are mapped to engine word timings and reported in sync with playback: real timings for Azure/Edge/Google, estimated elsewhere. Verified end-to-end with a raw SSIP client (marks arrive as each word is spoken).
 - **Stop/pause/resume** — STOP lands within ~`ChunkMs` of audio; PAUSE aborts and speechd re-speaks from the pause mark on resume (same behaviour as stock modules)
+- **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper exactly as it does for VoiceGarden-SAPI on Windows. `<mark>` tags are timed by the module itself either way.
+- **Accessibility modes** — punctuation announcement (`some`/`most`/`all`), spelling mode, and capital-letter recognition are applied as text preprocessing (the engines don't implement them natively)
+- **Sound icons** — `SOUND_ICON` messages play the named file from `SoundIconFolder` (Debian's `sound-icons` package provides the standard set), falling back to speaking the icon name
 - **No root needed** — the installer puts everything under `~/.local` and `~/.config`
 
 ## Install
@@ -147,5 +150,5 @@ git tag v0.1.0 && git push --tags
 - Cloud PCM rates are declared per engine rather than signalled on the wire (24 kHz for Azure/Cartesia/Edge/OpenAI/Google — Google is pinned to 24 kHz server-side; 44.1 kHz for ElevenLabs defaults). Selecting non-default provider output formats via credentials can therefore play at the wrong speed.
 - Estimated word timings (all engines except Azure/Edge/Google) arrive after synthesis, so their marks fire late on long utterances; real-timing engines report marks as audio plays.
 - If a sherpa model directory passes the registry check but its files fail to load inside the C++ runtime, the utterance is silently dropped (BEGIN/END with no audio) and the failed engine stays cached until the module restarts.
-- Sound icons are spoken as text (no icon file support).
-- Punctuation/spelling/capital-letter modes are accepted but not applied.
+- Punctuation/spelling/capital expansions are English wordings ("comma", "period"); localisation would need per-language tables.
+- SSML passthrough ignores the SSIP rate/pitch/volume parameters for the utterance (prosody in the markup wins) — plain-text speech applies them as before.

@@ -22,6 +22,10 @@ pub struct ModuleConfig {
     pub chunk_ms: u32,
     /// ONNX runtime intra-op thread count for sherpa-onnx models.
     pub num_threads: i32,
+    /// Directory of named sound-icon files (played for SOUND_ICON
+    /// messages instead of speaking the name). Debian's
+    /// `sound-icons` package installs to this path.
+    pub sound_icon_folder: String,
 }
 
 impl Default for ModuleConfig {
@@ -34,6 +38,7 @@ impl Default for ModuleConfig {
             default_voice: None,
             chunk_ms: 250,
             num_threads: 2,
+            sound_icon_folder: "/usr/share/sounds/sound-icons".into(),
         }
     }
 }
@@ -84,6 +89,7 @@ impl ModuleConfig {
                         }
                     }
                 }
+                "SoundIconFolder" => self.sound_icon_folder = value,
                 _ => {
                     eprintln!(
                         "voicegarden-spd: ignoring unknown config key {key:?} (line {})",
@@ -137,8 +143,9 @@ mod tests {
     #[test]
     fn unknown_keys_are_ignored() {
         let mut cfg = ModuleConfig::default();
-        cfg.apply("FutureKey whatever\nChunkMs 99999\n");
+        cfg.apply("FutureKey whatever\nChunkMs 99999\nSoundIconFolder /opt/icons\n");
         assert_eq!(cfg.chunk_ms, 2000, "ChunkMs clamps to 2000");
+        assert_eq!(cfg.sound_icon_folder, "/opt/icons");
     }
 
     #[test]

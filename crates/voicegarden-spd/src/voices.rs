@@ -49,6 +49,19 @@ pub struct VgVoice {
     /// Edge's WS stream is 24 kHz MP3, OpenAI's default MP3 is 24 kHz,
     /// ElevenLabs' default MP3 is 44.1 kHz).
     pub pcm_rate: u32,
+    /// Whether the engine accepts SSML input (the crate's azure/edge/google
+    /// paths build or forward SSML natively). When true and the client sent
+    /// SSML, the module passes it through (minus `<mark>` tags, which the
+    /// module times itself) — giving clients `<prosody>`, `<break>`,
+    /// `<say-as>`, `<sub>` etc., and SpeechMarkdown via the crate's
+    /// in-`speak()` conversion.
+    pub ssml_capable: bool,
+}
+
+/// Engines whose rust-tts-wrapper implementation accepts SSML input.
+#[must_use]
+pub fn engine_accepts_ssml(engine_id: &str) -> bool {
+    matches!(engine_id, "azure" | "edge" | "google")
 }
 
 /// Fixed PCM output rate per cloud engine (see [`VgVoice::pcm_rate`]).
@@ -127,6 +140,7 @@ pub fn local_sherpa_voices(models_dir: &Path, num_threads: i32) -> Vec<VgVoice> 
                 .to_string(),
                 sample_rate: Some(info.sample_rate),
                 pcm_rate: info.sample_rate,
+                ssml_capable: false,
             });
         }
     }
@@ -168,6 +182,7 @@ pub fn cloud_voices(cache: &VoiceCache, credentials: &serde_json::Value) -> Vec<
                 credentials: creds_json.clone(),
                 sample_rate: None,
                 pcm_rate: cloud_pcm_rate(engine_id),
+                ssml_capable: engine_accepts_ssml(engine_id),
             });
         }
     }

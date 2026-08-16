@@ -18,7 +18,7 @@ use rust_tts_wrapper::engine::TtsEngine;
 use crate::config::ModuleConfig;
 use crate::glue::{self, msgtype, SPDVoice, STDIN_FILENO};
 use crate::pipeline::{self, Prosody};
-use crate::ssml::strip_ssml_with_marks;
+use crate::ssml;
 use crate::voices::{
     cloud_voices, load_credentials, load_voice_cache, local_sherpa_voices, VgVoice,
 };
@@ -43,6 +43,9 @@ struct MsgSettings {
     voice_type: i32, // -1 unspecified, else SPDVoiceType value
     language: Option<String>,
     synthesis_voice: Option<String>,
+    punctuation: crate::preprocess::PunctMode,
+    spelling: bool,
+    capitals: crate::preprocess::CapMode,
 }
 
 impl Default for MsgSettings {
@@ -55,6 +58,9 @@ impl Default for MsgSettings {
             voice_type: -1,
             language: None,
             synthesis_voice: None,
+            punctuation: crate::preprocess::PunctMode::None,
+            spelling: false,
+            capitals: crate::preprocess::CapMode::None,
         }
     }
 }
@@ -297,6 +303,14 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         .and_then(|guard| guard.clone())
         .unwrap_or_default();
 
+    // Sound icons: play the named file when installed, else speak the name.
+    if msgtype_ == msgtype::SOUND_ICON {
+        let icon_name = text.trim();
+        unsafe { glue::module_speak_ok() };
+        play_sound_icon(icon_name);
+        return;
+    }
+
     let Some(voice) = resolve_voice(&settings) else {
         eprintln!("voicegarden-spd: no voice available for speak request");
         unsafe { glue::module_speak_error() };
@@ -311,29 +325,49 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         return;
     };
 
-    let (clean, marks) = strip_ssml_with_marks(&text);
-    if clean.trim().is_empty() && msgtype_ != msgtype::SOUND_ICON {
+    let processed = ssml::process(&text);
+    let mut plain = processed.plain;
+    if plain.trim().is_empty() {
         unsafe { glue::module_speak_error() };
         return;
     }
 
     unsafe { glue::module_speak_ok() };
 
-    // Sound icons and single characters are spoken as text (no icon files
-    // shipped); everything else is a normal utterance.
-    let spoken = if msgtype_ == msgtype::SOUND_ICON && clean.trim().is_empty() {
-        text.trim().to_string()
+    // Accessibility expansions (punctuation announcement, spelling,
+    // capitals) apply to the plain text; when active they disable SSML
+    // passthrough since the engine must see the expanded plain text.
+    let pp = crate::preprocess::Preprocess {
+        punctuation: settings.punctuation,
+        spelling: settings.spelling || msgtype_ == msgtype::SPELL,
+        capitals: settings.capitals,
+    };
+    if pp.is_active() {
+        plain = crate::preprocess::apply(&plain, pp);
+    }
+
+    // SSML passthrough: engines that accept SSML receive the client's
+    // markup (minus <mark> tags, which this module times itself). This
+    // gives clients <prosody>/<break>/<say-as>/<sub> and SpeechMarkdown
+    // (converted inside rust-tts-wrapper's speak()).
+    let synth_text: &str = if pp.is_active() {
+        plain.as_str()
     } else {
-        clean
+        processed
+            .ssml
+            .as_deref()
+            .filter(|_| voice.ssml_capable)
+            .unwrap_or(plain.as_str())
     };
 
     let prosody = Prosody::from_spd(settings.rate, settings.pitch, settings.volume);
     pipeline::speak(
         engine,
         &voice,
-        &spoken,
+        synth_text,
+        &plain,
         prosody,
-        &marks,
+        &processed.marks,
         config().chunk_ms,
         &STOP_REQUESTED,
         &|| unsafe {
@@ -403,11 +437,90 @@ pub extern "C" fn module_set(var: *const c_char, val: *const c_char) -> c_int {
             settings.language = null_or_value(&val);
             0
         }
-        // Punctuation/spelling/capital modes are accepted but not yet
-        // applied (the engines handle punctuation themselves).
-        "punctuation_mode" | "spelling_mode" | "cap_let_recogn" => 0,
+        "punctuation_mode" => {
+            let Some(mode) = crate::preprocess::PunctMode::parse(&val) else {
+                return -1;
+            };
+            settings.punctuation = mode;
+            0
+        }
+        "spelling_mode" => {
+            settings.spelling = val != "off";
+            0
+        }
+        "cap_let_recogn" => {
+            let Some(mode) = crate::preprocess::CapMode::parse(&val) else {
+                return -1;
+            };
+            settings.capitals = mode;
+            0
+        }
         _ => -1,
     }
+}
+
+/// Play a named sound icon from `SoundIconFolder` when the file exists;
+/// otherwise speak the icon name through the default voice (the stock
+/// modules' documented fallback).
+fn play_sound_icon(name: &str) {
+    let cfg = config();
+    if let Some(path) = crate::icons::icon_path(&cfg.sound_icon_folder, name) {
+        match std::fs::read(&path)
+            .map_err(|e| e.to_string())
+            .and_then(|bytes| crate::icons::parse_wav(&bytes))
+        {
+            Ok(wav) => {
+                // Stream the icon audio inline; no 706 (see
+                // stream_raw_pcm docs — the server would double-play).
+                pipeline::stream_raw_pcm(
+                    &wav.samples,
+                    wav.sample_rate,
+                    cfg.chunk_ms,
+                    &STOP_REQUESTED,
+                    &|| unsafe {
+                        glue::module_process(STDIN_FILENO, 0);
+                    },
+                );
+                return;
+            }
+            Err(e) => {
+                eprintln!(
+                    "voicegarden-spd: sound icon {} unreadable ({e}), speaking name",
+                    path.display()
+                );
+            }
+        }
+    }
+
+    // Fallback: speak the icon name like any text.
+    let settings = SETTINGS
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .unwrap_or_default();
+    let Some(voice) = resolve_voice(&settings) else {
+        eprintln!("voicegarden-spd: no voice available to speak icon name");
+        return;
+    };
+    let Some(engine) = engine_for(&voice) else {
+        return;
+    };
+    if name.trim().is_empty() {
+        return;
+    }
+    pipeline::speak(
+        engine,
+        &voice,
+        name,
+        name,
+        Prosody::from_spd(settings.rate, settings.pitch, settings.volume),
+        &[],
+        cfg.chunk_ms,
+        &STOP_REQUESTED,
+        &|| unsafe {
+            glue::module_process(STDIN_FILENO, 0);
+        },
+    );
 }
 
 #[no_mangle]
