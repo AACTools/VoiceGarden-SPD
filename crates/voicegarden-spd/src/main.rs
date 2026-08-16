@@ -18,11 +18,8 @@ fn main() {
         .and_then(|a| std::ffi::CString::new(a.into_string().ok()?).ok());
 
     // Read configuration
-    let ret = callbacks::module_config(
-        configfile
-            .as_ref()
-            .map_or(std::ptr::null(), |c| c.as_ptr()),
-    );
+    let ret =
+        callbacks::module_config(configfile.as_ref().map_or(std::ptr::null(), |c| c.as_ptr()));
     if ret != 0 {
         callbacks::module_close();
         std::process::exit(1);
@@ -49,7 +46,9 @@ fn main() {
         let text = if msg.is_null() {
             "Unspecified initialization error".to_string()
         } else {
-            unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
+            unsafe { CStr::from_ptr(msg) }
+                .to_string_lossy()
+                .into_owned()
         };
         println!("399-{text}");
         println!("399 ERR CANT INIT MODULE");
@@ -64,7 +63,9 @@ fn main() {
     let text = if msg.is_null() {
         "Unspecified initialization success".to_string()
     } else {
-        unsafe { CStr::from_ptr(msg) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(msg) }
+            .to_string_lossy()
+            .into_owned()
     };
     println!("299-{text}");
     println!("299 OK LOADED SUCCESSFULLY");

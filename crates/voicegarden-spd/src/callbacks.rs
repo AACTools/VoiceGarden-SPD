@@ -19,7 +19,9 @@ use crate::config::ModuleConfig;
 use crate::glue::{self, msgtype, SPDVoice, STDIN_FILENO};
 use crate::pipeline::{self, Prosody};
 use crate::ssml::strip_ssml_with_marks;
-use crate::voices::{cloud_voices, load_credentials, load_voice_cache, local_sherpa_voices, VgVoice};
+use crate::voices::{
+    cloud_voices, load_credentials, load_voice_cache, local_sherpa_voices, VgVoice,
+};
 
 /// Set by STOP and PAUSE; cleared at the start of each utterance.
 static STOP_REQUESTED: LazyLock<Arc<AtomicBool>> =
@@ -276,11 +278,7 @@ pub extern "C" fn module_list_voices() -> *mut *mut SPDVoice {
 }
 
 #[no_mangle]
-pub extern "C" fn module_speak_sync(
-    data: *const c_char,
-    bytes: usize,
-    msgtype_: c_int,
-) {
+pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_: c_int) {
     STOP_REQUESTED.store(false, Ordering::SeqCst);
 
     let text = if data.is_null() {
@@ -338,7 +336,9 @@ pub extern "C" fn module_speak_sync(
         &marks,
         config().chunk_ms,
         &STOP_REQUESTED,
-        &|| unsafe { glue::module_process(STDIN_FILENO, 0); },
+        &|| unsafe {
+            glue::module_process(STDIN_FILENO, 0);
+        },
     );
 }
 
@@ -389,7 +389,9 @@ pub extern "C" fn module_set(var: *const c_char, val: *const c_char) -> c_int {
             0
         }
         "voice" => {
-            let Some(n) = parse_voice_type(&val) else { return -1 };
+            let Some(n) = parse_voice_type(&val) else {
+                return -1;
+            };
             settings.voice_type = n;
             0
         }

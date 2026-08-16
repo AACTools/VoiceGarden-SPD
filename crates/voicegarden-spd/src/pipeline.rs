@@ -203,6 +203,7 @@ pub fn speak(
     outcome
 }
 
+#[allow(clippy::too_many_arguments)]
 fn speak_inner(
     engine: &Arc<dyn TtsEngine>,
     voice: &VgVoice,
@@ -217,36 +218,34 @@ fn speak_inner(
     let voice_id = voice.engine_voice_id.clone();
     let text_owned = text.to_string();
 
-    let worker = std::thread::Builder::new()
-        .name("vg-synth".into())
-        .spawn({
-            let engine = Arc::clone(engine);
-            let stop_flag = Arc::clone(stop_flag);
-            move || {
-                let res = engine.speak_sync(
-                    &text_owned,
-                    Some(&voice_id),
-                    prosody.rate_mult,
-                    prosody.pitch_mult,
-                    prosody.volume_mult,
-                    Some(&mut |chunk: &[u8]| {
-                        if stop_flag.load(Ordering::SeqCst) {
-                            return;
-                        }
-                        let _ = tx.send(Msg::Pcm(chunk.to_vec()));
-                    }),
-                    Some(&mut |word, start, end, byte_offset, _len| {
-                        let _ = tx.send(Msg::Boundary(Boundary {
-                            word: word.to_string(),
-                            start,
-                            end,
-                            byte_offset,
-                        }));
-                    }),
-                );
-                let _ = tx.send(Msg::Done(res.map_err(|e| e.to_string())));
-            }
-        });
+    let worker = std::thread::Builder::new().name("vg-synth".into()).spawn({
+        let engine = Arc::clone(engine);
+        let stop_flag = Arc::clone(stop_flag);
+        move || {
+            let res = engine.speak_sync(
+                &text_owned,
+                Some(&voice_id),
+                prosody.rate_mult,
+                prosody.pitch_mult,
+                prosody.volume_mult,
+                Some(&mut |chunk: &[u8]| {
+                    if stop_flag.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    let _ = tx.send(Msg::Pcm(chunk.to_vec()));
+                }),
+                Some(&mut |word, start, end, byte_offset, _len| {
+                    let _ = tx.send(Msg::Boundary(Boundary {
+                        word: word.to_string(),
+                        start,
+                        end,
+                        byte_offset,
+                    }));
+                }),
+            );
+            let _ = tx.send(Msg::Done(res.map_err(|e| e.to_string())));
+        }
+    });
     let worker = match worker {
         Ok(w) => w,
         Err(e) => {
@@ -315,14 +314,11 @@ fn speak_inner(
             );
         }
 
-        match &done {
-            Some(res) => {
-                if let Err(e) = res {
-                    eprintln!("voicegarden-spd: synthesis failed: {e}");
-                }
-                break;
+        if let Some(res) = &done {
+            if let Err(e) = res {
+                eprintln!("voicegarden-spd: synthesis failed: {e}");
             }
-            None => {}
+            break;
         }
         if stop_flag.load(Ordering::SeqCst) {
             let _ = engine.stop();
@@ -353,11 +349,8 @@ fn speak_inner(
             let take = pending.len().min(samples_per_chunk);
             let chunk: Vec<u16> = pending.drain(..take).collect();
             send_pcm(&chunk, rate);
-            #[allow(clippy::cast_precision_loss)]
-            {
-                sent_secs += chunk.len() as f32 / rate as f32;
-            }
         }
+        let _ = sent_secs; // audio position no longer needed once flushing
         fire_due_marks(
             marks,
             &mut next_mark,
@@ -532,10 +525,7 @@ mod tests {
             mark("b", text.find("three").unwrap()),
         ];
         let mut next = 0usize;
-        let partial = vec![
-            boundary("one", 0.0, 0.5),
-            boundary("two", 0.5, 1.0),
-        ];
+        let partial = vec![boundary("one", 0.0, 0.5), boundary("two", 0.5, 1.0)];
         // "a" is knowable and due at 0.6s; "b" not yet knowable.
         fire_due_marks(&marks, &mut next, &words, &partial, 1.0, 0.6, false);
         assert_eq!(next, 1);
@@ -543,7 +533,15 @@ mod tests {
         fire_due_marks(&marks, &mut next, &words, &partial, 1.0, 5.0, false);
         assert_eq!(next, 1);
         // Finalized: everything fires.
-        fire_due_marks(&marks, &mut next, &words, &partial, 1.0, f32::INFINITY, true);
+        fire_due_marks(
+            &marks,
+            &mut next,
+            &words,
+            &partial,
+            1.0,
+            f32::INFINITY,
+            true,
+        );
         assert_eq!(next, 2);
     }
 

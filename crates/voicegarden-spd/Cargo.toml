@@ -16,10 +16,14 @@ path = "src/main.rs"
 name = "voicegarden-spd-refresh"
 path = "src/bin/refresh.rs"
 
+[[bin]]
+name = "voicegarden-spd"
+path = "src/bin/vgctl.rs"
+
 [dependencies]
 # feat/vgspd-integration = feat/cloud-streaming-delivery (PR #10) +
 # feat/expose-sherpaonnx-engine (PR #9); switch to a tag/main once both merge.
-rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", branch = "feat/vgspd-integration", default-features = false, features = [
+rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", branch = "fix/google-sample-rate-pin", default-features = false, features = [
     "sherpaonnx",
     "cloud",
 ] }

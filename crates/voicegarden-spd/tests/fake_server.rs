@@ -62,7 +62,11 @@ impl Module {
                 }
             }
         });
-        Self { child, stdin, lines: rx }
+        Self {
+            child,
+            stdin,
+            lines: rx,
+        }
     }
 
     fn send(&mut self, line: &str) {
@@ -142,7 +146,7 @@ fn init(mut m: Module) -> Module {
     let reply = m.line();
     assert!(reply.starts_with("299-"), "INIT reply: {reply}");
     assert_eq!(
-        reply.split('\n').last().unwrap(),
+        reply.split('\n').next_back().unwrap(),
         "299 OK LOADED SUCCESSFULLY"
     );
     m
@@ -217,14 +221,14 @@ fn speak_with_stub_voice_streams_protocol_events() {
     m.send("LIST VOICES");
     let reply = m.until("200 OK VOICE LIST SENT");
     assert!(
-        reply.iter().any(|l| l.starts_with("200-piper-nl-rdh-low#0\t")),
+        reply
+            .iter()
+            .any(|l| l.starts_with("200-piper-nl-rdh-low#0\t")),
         "voices: {reply:?}"
     );
 
     m.send("SET");
-    m.send_block(
-        "rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n",
-    );
+    m.send_block("rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n");
     m.line();
     m.line();
 
@@ -246,9 +250,7 @@ fn stop_is_acknowledged_between_utterances() {
     let m = Module::spawn(&[("HOME", home.to_str().unwrap())]);
     let mut m = init(m);
     m.send("SET");
-    m.send_block(
-        "rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n",
-    );
+    m.send_block("rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n");
     m.line();
     m.line();
 

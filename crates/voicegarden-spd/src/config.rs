@@ -29,10 +29,8 @@ impl Default for ModuleConfig {
         let home = std::env::var("HOME").unwrap_or_else(|_| ".".into());
         Self {
             models_dir: PathBuf::from(&home).join(".rust-tts-wrapper/sherpaonnx"),
-            credentials_file: PathBuf::from(&home)
-                .join(".config/voicegarden-spd/engines.json"),
-            voice_cache_file: PathBuf::from(&home)
-                .join(".cache/voicegarden-spd/voices.json"),
+            credentials_file: PathBuf::from(&home).join(".config/voicegarden-spd/engines.json"),
+            voice_cache_file: PathBuf::from(&home).join(".cache/voicegarden-spd/voices.json"),
             default_voice: None,
             chunk_ms: 250,
             num_threads: 2,
@@ -50,9 +48,7 @@ impl ModuleConfig {
             return cfg;
         };
         let Ok(text) = std::fs::read_to_string(path) else {
-            eprintln!(
-                "voicegarden-spd: config file {path} not readable, using defaults"
-            );
+            eprintln!("voicegarden-spd: config file {path} not readable, using defaults");
             return cfg;
         };
         cfg.apply(&text);
@@ -73,12 +69,8 @@ impl ModuleConfig {
             let value = unquote(value);
             match key {
                 "ModelsDir" => self.models_dir = PathBuf::from(expand(&value)),
-                "CredentialsFile" => {
-                    self.credentials_file = PathBuf::from(expand(&value))
-                }
-                "VoiceCacheFile" => {
-                    self.voice_cache_file = PathBuf::from(expand(&value))
-                }
+                "CredentialsFile" => self.credentials_file = PathBuf::from(expand(&value)),
+                "VoiceCacheFile" => self.voice_cache_file = PathBuf::from(expand(&value)),
                 "DefaultVoice" => self.default_voice = Some(value),
                 "ChunkMs" => {
                     if let Ok(ms) = value.parse::<u32>() {
