@@ -11,7 +11,7 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 - **Streaming audio** — cloud PCM is handed to the speech-dispatcher server as chunks arrive from the network (rust-tts-wrapper decodes MP3 incrementally); sherpa-onnx models stream sentence batches as each sentence finishes synthesising
 - **Word highlighting** — `<mark>` index marks (including speechd's own `__spd_N` pause marks) are mapped to engine word timings and reported in sync with playback: real timings for Azure/Edge/Google, progressively-anchored estimates elsewhere. Verified end-to-end with a raw SSIP client (marks arrive as each word is spoken).
 - **Stop/pause/resume** — STOP lands within ~`ChunkMs` of audio; PAUSE aborts and speechd re-speaks from the pause mark on resume (same behaviour as stock modules)
-- **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper exactly as it does for VoiceGarden-SAPI on Windows. `<mark>` tags are timed by the module itself either way.
+- **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper. `<mark>` tags are timed by the module itself either way.
 - **Accessibility modes** — punctuation announcement (`some`/`most`/`all`), spelling mode, and capital-letter recognition. Spelling uses native SSML `<say-as interpret-as="characters">` on SSML-capable engines (Azure/Edge/Google) and a text approximation elsewhere; punctuation and capitals are applied as text preprocessing (the engines don't implement them natively)
 - **Sound icons** — `SOUND_ICON` messages play the named file from `SoundIconFolder` (Debian's `sound-icons` package provides the standard set), falling back to speaking the icon name
 - **No root needed** — the installer puts everything under `~/.local` and `~/.config`
@@ -206,9 +206,9 @@ git tag v0.2.1 && git push --tags
 
 ## Roadmap
 
-- **GTK4/libadwaita configuration app** (VoiceGarden.UI's Linux counterpart): model browser/downloader with licence display, cloud credential editor, voice preview, engine toggles — on top of the same library calls the CLI uses
+- **`model install <id>`** — download + verify + extract a registry model into the models dir straight from `model find` (until then the URL is printed; fp16 archives are flagged)
+- Real-hardware aarch64 verification (Raspberry Pi)
 - Debian/Fedora official-repo packaging once there's a track record
-- Flatpak packaging of the config app (the module itself is inherently system-level: it must live outside the sandbox where speech-dispatcher can exec it)
 - Opt-in punctuation/spelling mode localisation tables
 
 ## Known limitations
@@ -216,6 +216,6 @@ git tag v0.2.1 && git push --tags
 - **Local sherpa-onnx models stream per sentence batch** (first sentence's audio starts playing while later sentences synthesise); a *single-sentence* utterance still completes synthesis before its audio flows — inherent to sentence-batched generation. Cloud engines stream as bytes arrive; engines whose APIs return one JSON document with base64 audio (Google, ElevenLabs `with-timestamps`) deliver only after the response completes — an API limitation.
 - **Cloud PCM rates are declared, not signalled.** rust-tts-wrapper delivers PCM16 mono through `on_audio` without a rate, so the module supplies the provider's fixed rate (24 kHz for Azure/Cartesia/Edge/OpenAI/…, 44.1 kHz for ElevenLabs). Non-default provider output formats could therefore play at the wrong speed.
 - **Estimated word timings** (all engines except Azure/Edge/Google) fire progressively, anchored to delivered audio — accurate pacing, but the estimate itself assumes ~150 wpm, so word positions can drift within a sentence on unusually fast/slow voices. Real-timing engines report exact positions.
-- If a sherpa model directory matches a registry id but its files fail to load inside the C++ runtime (incomplete download, corrupt archive, or an unsupported variant such as fp16), every utterance through it is dropped (BEGIN/END with no audio) — **re-running does not help**; it fails deterministically until the model is fixed or removed. `voicegarden-spd doctor` validates every installed model (load + synthesis, crash-isolated) and tells you exactly which one is broken and what to do.
+- If a sherpa model directory matches a registry id but its files fail to load inside the C++ runtime (incomplete download, corrupt archive, or an unsupported variant such as fp16), every utterance through it is dropped (BEGIN/END with no audio) — **re-running does not help**; it fails deterministically until the model is fixed or removed. `voicegarden-spd doctor` validates every installed model (load + synthesis, crash-isolated) and tells you exactly which one is broken; `model find` flags fp16 archives before you download them.
 - Punctuation/spelling/capital expansions are English wordings ("comma", "period"); localisation would need per-language tables.
 - SSML passthrough ignores the SSIP rate/pitch/volume parameters for the utterance (prosody in the markup wins) — plain-text speech applies them as before.
