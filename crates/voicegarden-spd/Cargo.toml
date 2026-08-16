@@ -20,7 +20,7 @@ name = "voicegarden-spd"
 path = "src/bin/vgctl.rs"
 
 [dependencies]
-rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", rev = "fb06fb2", default-features = false, features = [
+rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", rev = "51d7d0b", default-features = false, features = [
     "sherpaonnx",
     "cloud",
 ] }
