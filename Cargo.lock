@@ -1034,7 +1034,7 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "0.1.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?branch=fix%2Fgoogle-sample-rate-pin#a45e38afbb0857e69e9627f768a3ea84b83030b9"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?rev=fb06fb2#fb06fb28d17b39889979f794d602e06092cc64bb"
 dependencies = [
  "anyhow",
  "base64",
