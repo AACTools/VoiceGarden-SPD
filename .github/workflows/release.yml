@@ -64,11 +64,9 @@ jobs:
              target/release/voicegarden-spd config/voicegarden-spd.conf dist/bin/
 
       - name: Build .deb + .rpm (nfpm)
+        # build-packages.sh downloads nfpm itself (cached under NFPM_DIR)
+        # and knows the correct release-asset naming.
         run: |
-          curl -fsSL https://github.com/goreleaser/nfpm/releases/download/v2.43.0/nfpm_2.43.0_$( \
-              case "$(uname -m)" in x86_64) echo x86_64;; aarch64) echo arm64;; esac \
-            )_Linux.tar.gz | tar -xz nfpm
-          chmod +x nfpm
           ./packaging/build-packages.sh dist/bin "${GITHUB_REF_NAME#v}" \
               "${{ matrix.deb_arch }}" "${{ matrix.rpm_arch }}" "${{ matrix.triplet }}" dist
         env:
