@@ -85,13 +85,14 @@ jobs:
 
   test-deb:
     name: Package smoke test (.deb, ${{ matrix.arch }})
-    runs-on: ubuntu-latest
     needs: build
     # Ubuntu runners ship speech-dispatcher 0.11 (no server-side audio);
     # run in trixie containers like the CI smoke job so the .deb is
-    # exercised against speechd 0.12.
+    # exercised against speechd 0.12. The container arch follows the
+    # runner arch, so the arm64 .deb needs an arm64 runner.
     container:
       image: debian:trixie
+    runs-on: ${{ matrix.runner }}
     env:
       HOME: /root
       XDG_RUNTIME_DIR: /tmp/xdg
@@ -101,8 +102,10 @@ jobs:
         include:
           - arch: x86_64
             deb_arch: amd64
+            runner: ubuntu-latest
           - arch: aarch64
             deb_arch: arm64
+            runner: ubuntu-24.04-arm
     steps:
       - name: Install the .deb on this runner
         run: |
@@ -124,6 +127,7 @@ jobs:
           mkdir -p "$XDG_RUNTIME_DIR" && chmod 700 "$XDG_RUNTIME_DIR"
           pulseaudio -D --exit-idle-time=-1 --disallow-exit 2>&1 || true
           sleep 1
+          pactl info >/dev/null || { echo "pulse failed to start"; exit 1; }
           pactl load-module module-null-sink || true
           mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
           touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
@@ -133,7 +137,12 @@ jobs:
           cd ~/.rust-tts-wrapper/sherpaonnx
           curl -fsSL -o p.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2
           tar -xjf p.tar.bz2 -C piper-nl-rdh-low --strip-components=1
-          spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."
+          if ! spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."; then
+            echo "=== speechd logs on failure ==="
+            tail -n 40 "$XDG_RUNTIME_DIR"/speech-dispatcher/log/*.log 2>/dev/null || true
+            tail -n 40 /root/.cache/speech-dispatcher/log/*.log 2>/dev/null || true
+            exit 1
+          fi
       - name: doctor (post-install diagnostics)
         run: voicegarden-spd doctor || true
       - name: clean removal
