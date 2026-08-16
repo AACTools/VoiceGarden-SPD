@@ -66,19 +66,53 @@ cargo build --release
 
 ## Management CLI
 
-`voicegarden-spd` is the headless companion to the module (a GTK configuration app is on the roadmap and will sit on the same library calls):
+`voicegarden-spd` configures and manages everything without a GUI.
 
 ```bash
 voicegarden-spd status                    # installation + voice inventory
 voicegarden-spd doctor                    # diagnose a broken setup
 voicegarden-spd install [--models-dir DIR] [--no-restart]
 voicegarden-spd uninstall [--no-restart]
-voicegarden-spd refresh [--config FILE]   # fetch cloud voice lists (network)
-voicegarden-spd voices [--config FILE]    # merged local + cloud voice list
-voicegarden-spd speak <voice> "<text>"    # direct preview (bypasses speechd)
+voicegarden-spd refresh [ENGINES…]        # fetch cloud voice lists (network)
 voicegarden-spd bench <voice> [text] [N]  # cold/warm synthesis timings
 voicegarden-spd migrate-models            # move legacy model dirs to the primary path
 ```
+
+### Engines
+
+```bash
+voicegarden-spd engine list               # every engine: credential status + voice counts
+voicegarden-spd engine add azure          # interactive: prompt for keys (hidden), verify live, save 0600, refresh
+voicegarden-spd engine add google --set apiKey=…   # non-interactive
+voicegarden-spd engine test azure         # live credential check ("ok azure: … 1638 ms, 556 voices")
+voicegarden-spd engine show google        # masked credentials + cache state
+voicegarden-spd engine remove openai      # drop credentials + cached voices
+```
+
+`engine add` verifies credentials against the provider **before** saving (bad keys abort with nothing written; `--force` overrides) and refreshes just that engine's voice cache afterwards.
+
+### Voice search
+
+```bash
+voicegarden-spd voice search sonia --source cloud --lang en-GB
+voicegarden-spd voice search --source local --quality high
+voicegarden-spd voice search --gender female --engine edge --lang en
+voicegarden-spd voice search --multilingual
+voicegarden-spd voice search kokoro --json          # machine-readable (no credentials)
+voicegarden-spd voice info azure/en-GB-SoniaNeural  # full detail
+voicegarden-spd voice test edge/en-GB-RyanNeural "Hello"   # hear it (no speechd)
+```
+
+Filters: `--source local|cloud` (offline/online), `--engine`, `--lang` (base `en` matches `en-US`), `--gender`, `--quality` (local models), `--multilingual`, plus free-text terms. Quality/gender/multilingual come from the sherpa registry and provider voice lists; multilingual cloud voices (e.g. Azure's `…MultilingualNeural`) are detected automatically.
+
+### Model registry
+
+```bash
+voicegarden-spd model find --lang nl --quality high     # all 1300+ models, incl. not-installed
+voicegarden-spd model find kokoro --multilingual        # ● marks installed; sizes + licences
+```
+
+`model find` prints each match's download URL and warns about **fp16 archives** (they abort in the CPU ONNX runtime this build links).
 
 ### Voices
 

@@ -1,9 +1,16 @@
 [workspace]
 resolver = "2"
-members = ["crates/voicegarden-spd"]
+members = ["crates/voicegarden-spd", "crates/voicegarden-cli"]
+
+[workspace.dependencies]
+# Pinned to a tagged rust-tts-wrapper release; bump on the next release.
+rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag = "v0.3.18", default-features = false, features = [
+    "sherpaonnx",
+    "cloud",
+] }
 
 [workspace.package]
-version = "0.2.3"
+version = "0.3.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/AACTools/VoiceGarden-SPD"

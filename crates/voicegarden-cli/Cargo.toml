@@ -1,6 +1,6 @@
 [package]
-name = "voicegarden-spd"
-description = "VoiceGarden speech-dispatcher output module: 1300+ sherpa-onnx local voices and 20 cloud engines for every speechd client"
+name = "voicegarden-cli"
+description = "voicegarden-spd management CLI: engines, credentials, voice search, install"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -8,21 +8,16 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "sd_voicegarden"
+name = "voicegarden-spd"
 path = "src/main.rs"
 
-[[bin]]
-name = "voicegarden-spd-refresh"
-path = "src/bin/refresh.rs"
-
 [dependencies]
+voicegarden-spd = { path = "../voicegarden-spd" }
 rust-tts-wrapper.workspace = true
-libc = "0.2"
+clap = { version = "4", features = ["derive"] }
+rpassword = "7"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [dev-dependencies]
 tempfile = "3"
-
-[build-dependencies]
-cc = "1"

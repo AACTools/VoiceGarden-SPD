@@ -56,6 +56,130 @@ pub struct VgVoice {
     /// `<say-as>`, `<sub>` etc., and SpeechMarkdown via the crate's
     /// in-`speak()` conversion.
     pub ssml_capable: bool,
+    // ---- searchable metadata (not used by the module protocol) ----
+    /// Human-readable display name.
+    pub display_name: String,
+    /// "Male" / "Female" / "Unknown" (local sherpa voices are Unknown).
+    pub gender: String,
+    /// Registry quality/variant tier (local only; "" for cloud).
+    pub quality: String,
+    /// Model family (local only; "" for cloud).
+    pub model_type: String,
+    /// Every language this voice covers (local multilingual models carry
+    /// several; cloud voices carry one).
+    pub languages: Vec<String>,
+    /// True when the voice covers several languages (local registry data,
+    /// or "Multilingual" in an Azure/Edge voice id).
+    pub multilingual: bool,
+    /// SPDX licence id (local only).
+    pub license: String,
+    /// Speaker count of the underlying model (local only).
+    pub num_speakers: u32,
+}
+
+/// Where a voice synthesises.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Source {
+    Local,
+    Cloud,
+}
+
+impl VgVoice {
+    /// Local vs cloud source.
+    #[must_use]
+    pub fn source(&self) -> Source {
+        if self.engine_id == "sherpaonnx" {
+            Source::Local
+        } else {
+            Source::Cloud
+        }
+    }
+}
+
+/// Search filter for [`filter_voices`]. All conditions AND together;
+/// `terms` match case-insensitively against name/id/engine/language.
+#[derive(Debug, Clone, Default)]
+pub struct VoiceFilter {
+    /// Free-text terms (all must match somewhere).
+    pub terms: Vec<String>,
+    /// Restrict to local (offline) or cloud voices.
+    pub source: Option<Source>,
+    /// Restrict to these engine ids (case-insensitive).
+    pub engines: Vec<String>,
+    /// Base-language match: "en" matches "en-US"; "en-GB" matches exactly.
+    pub lang: Option<String>,
+    /// "male" / "female" / "unknown" (case-insensitive).
+    pub gender: Option<String>,
+    /// Exact registry tier ("low", "medium", "high", ...) — local only.
+    pub quality: Option<String>,
+    /// Only multilingual voices.
+    pub multilingual: bool,
+}
+
+/// Base language of a BCP-47-ish code ("en-US" → "en").
+fn base_lang(code: &str) -> &str {
+    code.split('-').next().unwrap_or(code)
+}
+
+#[must_use]
+pub fn filter_voices(voices: &[VgVoice], f: &VoiceFilter) -> Vec<VgVoice> {
+    let lang = f.lang.as_deref().map(str::to_lowercase);
+    let gender = f.gender.as_deref().map(str::to_lowercase);
+    let quality = f.quality.as_deref().map(str::to_lowercase);
+    voices
+        .iter()
+        .filter(|v| {
+            if let Some(want) = f.source {
+                if v.source() != want {
+                    return false;
+                }
+            }
+            if !f.engines.is_empty()
+                && !f
+                    .engines
+                    .iter()
+                    .any(|e| e.eq_ignore_ascii_case(&v.engine_id))
+            {
+                return false;
+            }
+            if let Some(want) = &lang {
+                let exact = v.language.eq_ignore_ascii_case(want);
+                let base = v.languages.iter().any(|l| {
+                    l.eq_ignore_ascii_case(want) || base_lang(l).eq_ignore_ascii_case(want)
+                });
+                if !(exact || base) {
+                    return false;
+                }
+            }
+            if let Some(want) = &gender {
+                if !v.gender.eq_ignore_ascii_case(want) {
+                    return false;
+                }
+            }
+            if let Some(want) = &quality {
+                if !v.quality.eq_ignore_ascii_case(want) {
+                    return false;
+                }
+            }
+            if f.multilingual && !v.multilingual {
+                return false;
+            }
+            for term in &f.terms {
+                let t = term.to_lowercase();
+                let hay = format!(
+                    "{} {} {} {} {}",
+                    v.spd_name, v.display_name, v.engine_id, v.language, v.model_type
+                )
+                .to_lowercase();
+                let langs = v.languages.iter().any(|l| l.to_lowercase().contains(&t));
+                if !hay.contains(&t) && !langs {
+                    return false;
+                }
+            }
+            true
+        })
+        .cloned()
+        .collect()
 }
 
 /// Engines whose rust-tts-wrapper implementation accepts SSML input.
@@ -114,11 +238,9 @@ pub fn local_sherpa_voices(models_dirs: &[std::path::PathBuf], num_threads: i32)
             let Some(info) = registry.get(&id) else {
                 continue;
             };
-            let lang = info
-                .language
-                .first()
-                .map(|l| l.lang_code.clone())
-                .unwrap_or_default();
+            let langs: Vec<String> = info.language.iter().map(|l| l.lang_code.clone()).collect();
+            let lang = langs.first().cloned().unwrap_or_default();
+            let multilingual = langs.len() > 1;
             let num_speakers = info.num_speakers.max(1);
             for sid in 0..num_speakers {
                 voices.push(VgVoice {
@@ -142,6 +264,18 @@ pub fn local_sherpa_voices(models_dirs: &[std::path::PathBuf], num_threads: i32)
                     sample_rate: Some(info.sample_rate),
                     pcm_rate: info.sample_rate,
                     ssml_capable: false,
+                    display_name: if num_speakers > 1 {
+                        format!("{} (speaker {sid})", info.name)
+                    } else {
+                        info.name.clone()
+                    },
+                    gender: "Unknown".into(),
+                    quality: info.quality.clone(),
+                    model_type: info.model_type.clone(),
+                    languages: langs.clone(),
+                    multilingual,
+                    license: info.license.clone(),
+                    num_speakers: info.num_speakers,
                 });
             }
         }
@@ -175,6 +309,8 @@ pub fn cloud_voices(cache: &VoiceCache, credentials: &serde_json::Value) -> Vec<
             .unwrap_or_else(|| serde_json::json!({}));
         let creds_json = creds_value.to_string();
         for v in &cache.engines[engine_id] {
+            let multilingual = v.id.to_lowercase().contains("multilingual")
+                || v.name.to_lowercase().contains("multilingual");
             voices.push(VgVoice {
                 spd_name: format!("{engine_id}/{}", v.id),
                 language: v.lang.clone(),
@@ -185,6 +321,18 @@ pub fn cloud_voices(cache: &VoiceCache, credentials: &serde_json::Value) -> Vec<
                 sample_rate: None,
                 pcm_rate: cloud_pcm_rate(engine_id),
                 ssml_capable: engine_accepts_ssml(engine_id),
+                display_name: if v.name.is_empty() {
+                    v.id.clone()
+                } else {
+                    v.name.clone()
+                },
+                gender: v.gender.clone(),
+                quality: String::new(),
+                model_type: String::new(),
+                languages: vec![v.lang.clone()],
+                multilingual,
+                license: String::new(),
+                num_speakers: 1,
             });
         }
     }
@@ -200,6 +348,16 @@ fn variant_for_gender(gender: &str) -> String {
         "female" => "female1".into(),
         _ => String::new(),
     }
+}
+
+/// The full merged voice list for a config: local models first, then the
+/// cached cloud voices of credentialed engines (+ edge).
+pub fn merged_voices(cfg: &crate::config::ModuleConfig) -> Vec<VgVoice> {
+    let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    let cache = load_voice_cache(&cfg.voice_cache_file);
+    let credentials = load_credentials(&cfg.credentials_file);
+    list.extend(cloud_voices(&cache, &credentials));
+    list
 }
 
 /// Load the credentials file (`engines.json`).
@@ -254,5 +412,165 @@ mod tests {
     fn missing_cache_is_empty() {
         let cache = load_voice_cache(Path::new("/nonexistent/voices.json"));
         assert!(cache.engines.is_empty());
+    }
+
+    fn fixture_voices() -> Vec<VgVoice> {
+        let mk = |spd: &str,
+                  engine: &str,
+                  lang: &str,
+                  gender: &str,
+                  quality: &str,
+                  langs: Vec<&str>,
+                  multi: bool| VgVoice {
+            spd_name: spd.into(),
+            language: lang.into(),
+            variant: String::new(),
+            engine_id: engine.into(),
+            engine_voice_id: "x".into(),
+            credentials: "{}".into(),
+            sample_rate: None,
+            pcm_rate: 24_000,
+            ssml_capable: false,
+            display_name: spd.into(),
+            gender: gender.into(),
+            quality: quality.into(),
+            model_type: "vits".into(),
+            languages: langs.iter().map(|s| (*s).to_string()).collect(),
+            multilingual: multi,
+            license: "MIT".into(),
+            num_speakers: 1,
+        };
+        vec![
+            mk(
+                "kokoro-multi#0",
+                "sherpaonnx",
+                "zh",
+                "Unknown",
+                "high",
+                vec!["zh", "en"],
+                true,
+            ),
+            mk(
+                "piper-nl#0",
+                "sherpaonnx",
+                "nl",
+                "Unknown",
+                "low",
+                vec!["nl"],
+                false,
+            ),
+            mk(
+                "edge/en-US-AriaNeural",
+                "edge",
+                "en-US",
+                "Female",
+                "",
+                vec!["en-US"],
+                false,
+            ),
+            mk(
+                "azure/en-US-AvaMultilingualNeural",
+                "azure",
+                "en-US",
+                "Female",
+                "",
+                vec!["en-US"],
+                true,
+            ),
+            mk(
+                "azure/de-DE-KatjaNeural",
+                "azure",
+                "de-DE",
+                "Female",
+                "",
+                vec!["de-DE"],
+                false,
+            ),
+            mk(
+                "openai/alloy",
+                "openai",
+                "en",
+                "Unknown",
+                "",
+                vec!["en"],
+                false,
+            ),
+        ]
+    }
+
+    #[test]
+    fn filter_by_source_and_gender() {
+        let vs = fixture_voices();
+        let f = VoiceFilter {
+            source: Some(Source::Cloud),
+            gender: Some("female".into()),
+            ..Default::default()
+        };
+        let out = filter_voices(&vs, &f);
+        let names: Vec<&str> = out.iter().map(|v| v.spd_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "edge/en-US-AriaNeural",
+                "azure/en-US-AvaMultilingualNeural",
+                "azure/de-DE-KatjaNeural"
+            ]
+        );
+    }
+
+    #[test]
+    fn filter_by_quality_local_only() {
+        let vs = fixture_voices();
+        let f = VoiceFilter {
+            quality: Some("high".into()),
+            ..Default::default()
+        };
+        let out = filter_voices(&vs, &f);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].spd_name, "kokoro-multi#0");
+    }
+
+    #[test]
+    fn filter_multilingual() {
+        let vs = fixture_voices();
+        let f = VoiceFilter {
+            multilingual: true,
+            ..Default::default()
+        };
+        let out = filter_voices(&vs, &f);
+        // local multilingual + cloud voice with "Multilingual" in the id
+        let names: Vec<&str> = out.iter().map(|v| v.spd_name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec!["kokoro-multi#0", "azure/en-US-AvaMultilingualNeural"]
+        );
+    }
+
+    #[test]
+    fn filter_lang_base_and_exact() {
+        let vs = fixture_voices();
+        let base = VoiceFilter {
+            lang: Some("en".into()),
+            ..Default::default()
+        };
+        assert_eq!(filter_voices(&vs, &base).len(), 4);
+        let exact = VoiceFilter {
+            lang: Some("en-GB".into()),
+            ..Default::default()
+        };
+        assert_eq!(filter_voices(&vs, &exact).len(), 0);
+    }
+
+    #[test]
+    fn filter_engine_and_terms() {
+        let vs = fixture_voices();
+        let f = VoiceFilter {
+            engines: vec!["AZURE".into()],
+            terms: vec!["katja".into()],
+            ..Default::default()
+        };
+        let out = filter_voices(&vs, &f);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].spd_name, "azure/de-DE-KatjaNeural");
     }
 }

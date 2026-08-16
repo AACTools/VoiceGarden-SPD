@@ -25,10 +25,13 @@ pub struct RefreshReport {
 /// * `engines_json_override` — use this credentials file instead of the
 ///   configured one (used by the `VOICEGARDEN_ENGINES_JSON` env var and
 ///   tests).
+/// * `only` — refresh just these engine ids (e.g. after `engine add`);
+///   `None` refreshes everything (edge + all credentialed engines).
 #[allow(clippy::too_many_lines)]
 pub fn run_refresh(
     config_path: Option<&str>,
     engines_json_override: Option<&Path>,
+    only: Option<&[String]>,
 ) -> Result<RefreshReport, String> {
     let cfg = ModuleConfig::load(config_path);
 
@@ -50,6 +53,15 @@ pub fn run_refresh(
             if key != "edge" && !wanted.contains(key) {
                 wanted.push(key.clone());
             }
+        }
+    }
+    if let Some(ids) = only {
+        wanted.retain(|id| ids.iter().any(|want| want == id));
+        if wanted.is_empty() {
+            return Err(format!(
+                "none of the requested engines are refreshable (asked for: {})",
+                ids.join(", ")
+            ));
         }
     }
 

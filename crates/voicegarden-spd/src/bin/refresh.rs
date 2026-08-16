@@ -28,8 +28,11 @@ fn main() -> ExitCode {
     let engines_override =
         std::env::var_os("VOICEGARDEN_ENGINES_JSON").map(std::path::PathBuf::from);
 
-    match voicegarden_spd::refresh::run_refresh(config_path.as_deref(), engines_override.as_deref())
-    {
+    match voicegarden_spd::refresh::run_refresh(
+        config_path.as_deref(),
+        engines_override.as_deref(),
+        None,
+    ) {
         Ok(report) if report.failures.is_empty() => ExitCode::SUCCESS,
         Ok(report) => {
             eprintln!(
