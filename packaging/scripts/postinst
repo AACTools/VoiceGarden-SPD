@@ -9,17 +9,40 @@
 set -e
 
 CONF="${VGSPD_CONF:-/etc/speech-dispatcher/speechd.conf}"
-LINE='AddModule "voicegarden-spd" "sd_voicegarden" "voicegarden-spd.conf"'
 
-if [ -f "$CONF" ]; then
-    if ! grep -q 'AddModule "voicegarden-spd"' "$CONF" 2>/dev/null; then
-        printf '%s\n' "$LINE" >> "$CONF"
-        echo "voicegarden-spd: registered module in $CONF"
+# Resolve the absolute module path across package layouts:
+#   deb multiarch  /usr/lib/<triplet>/speech-dispatcher-modules/
+#   plain / lib64  /usr/lib{,64}/speech-dispatcher-modules/        (rpm)
+# speechd resolves bare AddModule names against its own default
+# ModulesDir, which does not match the multiarch install dir on Debian,
+# so the absolute path is required.
+MODULE_BIN=""
+for candidate in \
+    /usr/lib/*/speech-dispatcher-modules/sd_voicegarden \
+    /usr/lib/speech-dispatcher-modules/sd_voicegarden \
+    /usr/lib64/speech-dispatcher-modules/sd_voicegarden
+do
+    if [ -x "$candidate" ]; then
+        MODULE_BIN="$candidate"
+        break
     fi
+done
+
+if [ -z "$MODULE_BIN" ]; then
+    echo "voicegarden-spd: WARNING sd_voicegarden binary not found where the" >&2
+    echo "  package expected it — not registering. Report this as a bug." >&2
 else
-    echo "voicegarden-spd: $CONF not found (speech-dispatcher not configured yet?);" \
-         "add this line once it exists:" >&2
-    echo "  $LINE" >&2
+    LINE="AddModule \"voicegarden-spd\" \"$MODULE_BIN\" \"voicegarden-spd.conf\""
+    if [ -f "$CONF" ]; then
+        if ! grep -q 'AddModule "voicegarden-spd"' "$CONF" 2>/dev/null; then
+            printf '%s\n' "$LINE" >> "$CONF"
+            echo "voicegarden-spd: registered module in $CONF"
+        fi
+    else
+        echo "voicegarden-spd: $CONF not found (speech-dispatcher not configured yet?);" \
+             "add this line once it exists:" >&2
+        echo "  $LINE" >&2
+    fi
 fi
 
 # speech-dispatcher >= 0.12 is required (server-side audio + speak queue).
