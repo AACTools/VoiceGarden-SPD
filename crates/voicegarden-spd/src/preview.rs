@@ -17,6 +17,17 @@ pub fn preview_wav(voice: &VgVoice, text: &str) -> Result<(PathBuf, Option<Strin
         cloud_pcm_rate(&voice.engine_id)
     };
 
+    // Mirror the module's SSML handling: for SSML-capable engines, upgrade
+    // the envelope to a full document (Edge/Azure return zero audio for a
+    // bare <speak> — issue #1).
+    let prepared;
+    let text = if voice.ssml_capable {
+        prepared = crate::ssml::ensure_ssml_document(text, &voice.language);
+        prepared.as_str()
+    } else {
+        text
+    };
+
     let mut pcm: Vec<u8> = Vec::new();
     engine
         .speak_sync(

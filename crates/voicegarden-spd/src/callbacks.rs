@@ -304,9 +304,11 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         .unwrap_or_default();
 
     // Sound icons: play the named file when installed, else speak the name.
+    // The SPEAK reply (200 OK SPEAKING) is sent by the playback path —
+    // stream_raw_pcm opens it immediately, the speak fallback defers it
+    // until audio exists (301 on failure).
     if msgtype_ == msgtype::SOUND_ICON {
         let icon_name = text.trim();
-        unsafe { glue::module_speak_ok() };
         play_sound_icon(icon_name);
         return;
     }
@@ -332,7 +334,10 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         return;
     }
 
-    unsafe { glue::module_speak_ok() };
+    // No early `200 OK SPEAKING`: pipeline::speak defers the reply until
+    // synthesis has produced audio, so a failed (or audio-less) utterance
+    // reaches the server as `301 ERROR CANT SPEAK` instead of a silent
+    // success (issue #1).
 
     // Accessibility expansions (punctuation announcement, spelling,
     // capitals) apply to the plain text. Two delivery strategies:
@@ -352,7 +357,9 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
     };
     let native_spelling = pp.spelling && voice.ssml_capable && processed.ssml.is_none();
 
-    let spelled_ssml;
+    // Owned text handed to the engine in the SSML branches (spelling
+    // wrapper or normalized passthrough document).
+    let prepared_ssml;
     let synth_text: &str = if native_spelling {
         let mut text = plain.clone();
         let without_spelling = crate::preprocess::Preprocess {
@@ -363,8 +370,8 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
             text = crate::preprocess::apply(&text, without_spelling);
             plain = text.clone();
         }
-        spelled_ssml = crate::preprocess::spelling_ssml(&text);
-        &spelled_ssml
+        prepared_ssml = crate::preprocess::spelling_ssml(&text, &voice.language);
+        prepared_ssml.as_str()
     } else if pp.is_active() {
         plain = crate::preprocess::apply(&plain, pp);
         plain.as_str()
@@ -372,12 +379,16 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         // SSML passthrough: engines that accept SSML receive the client's
         // markup (minus <mark> tags, which this module times itself). This
         // gives clients <prosody>/<break>/<say-as>/<sub> and SpeechMarkdown
-        // (converted inside rust-tts-wrapper's speak()).
-        processed
-            .ssml
-            .as_deref()
-            .filter(|_| voice.ssml_capable)
-            .unwrap_or(plain.as_str())
+        // (converted inside rust-tts-wrapper's speak()). The envelope is
+        // upgraded to a full document — Edge/Azure return zero audio for
+        // a bare <speak> (issue #1).
+        match processed.ssml.as_deref().filter(|_| voice.ssml_capable) {
+            Some(markup) => {
+                prepared_ssml = ssml::ensure_ssml_document(markup, &voice.language);
+                prepared_ssml.as_str()
+            }
+            None => plain.as_str(),
+        }
     };
 
     let prosody = Prosody::from_spd(settings.rate, settings.pitch, settings.volume);
