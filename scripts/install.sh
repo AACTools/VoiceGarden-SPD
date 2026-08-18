@@ -104,7 +104,7 @@ install_user_tarball() {
             || { echo "download failed" >&2; exit 1; }
     fi
     tar -xzf "$TMP/$file" -C "$TMP"
-    BIN_DIR="$(dirname "$(find "$TMP" -name sd_voicegarden -type f | head -1)")"
+    BIN_DIR="$(dirname "$(find "$TMP" -name sd_voicegarden-spd -type f | head -1)")"
     [ -x "$BIN_DIR/voicegarden-spd" ] || { echo "release tarball incomplete" >&2; exit 1; }
     "$BIN_DIR/voicegarden-spd" install
 }

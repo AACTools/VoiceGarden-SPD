@@ -48,19 +48,19 @@ jobs:
         run: |
           DIR="voicegarden-spd-${GITHUB_REF_NAME}-${{ matrix.arch }}-linux"
           mkdir -p "dist/$DIR"
-          cp target/release/sd_voicegarden \
+          cp target/release/sd_voicegarden-spd \
              target/release/voicegarden-spd-refresh \
              target/release/voicegarden-spd \
              "dist/$DIR/"
           cp config/voicegarden-spd.conf scripts/install.sh README.md LICENSE "dist/$DIR/"
-          chmod +x "dist/$DIR/install.sh" "dist/$DIR/sd_voicegarden" \
+          chmod +x "dist/$DIR/install.sh" "dist/$DIR/sd_voicegarden-spd" \
                    "dist/$DIR/voicegarden-spd-refresh" "dist/$DIR/voicegarden-spd"
           tar -C dist -czf "dist/${DIR}.tar.gz" "$DIR"
           # 'latest' alias so scripts/install.sh can use a stable URL.
           cp "dist/${DIR}.tar.gz" "dist/voicegarden-spd-latest-${{ matrix.arch }}-linux.tar.gz"
           # staging dir for the packaging step
           mkdir -p dist/bin
-          cp target/release/sd_voicegarden target/release/voicegarden-spd-refresh \
+          cp target/release/sd_voicegarden-spd target/release/voicegarden-spd-refresh \
              target/release/voicegarden-spd config/voicegarden-spd.conf dist/bin/
 
       - name: Build .deb + .rpm (nfpm)
@@ -75,7 +75,7 @@ jobs:
       - name: Smoke-test the built binaries
         run: |
           dist/bin/voicegarden-spd --version
-          dist/bin/sd_voicegarden </dev/null >/dev/null 2>&1 || [ $? -eq 2 ]
+          dist/bin/sd_voicegarden-spd </dev/null >/dev/null 2>&1 || [ $? -eq 2 ]
 
       - uses: actions/upload-artifact@v4
         with:
@@ -120,7 +120,7 @@ jobs:
         run: |
           DEB=$(ls voicegarden-spd_*_${{ matrix.deb_arch }}.deb)
           apt-get install -y "./$DEB"
-          dpkg -L voicegarden-spd | grep -E 'sd_voicegarden|usr/bin|modules/voicegarden-spd.conf'
+          dpkg -L voicegarden-spd | grep -E 'sd_voicegarden-spd|usr/bin|modules/voicegarden-spd.conf'
           voicegarden-spd --version
       - name: End-to-end speak
         run: |
@@ -137,17 +137,26 @@ jobs:
           sleep 1
           pactl info >/dev/null || { echo "pulse failed to start"; exit 1; }
           pactl load-module module-null-sink || true
-          mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
-          touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
+          mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low
+          touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low/placeholder
           speech-dispatcher --spawn || true
           sleep 2
+          # Auto-detection must have loaded us AND left the stock modules
+          # alone (issue #2: the package no longer appends an AddModule
+          # line to /etc/speech-dispatcher/speechd.conf).
+          spd-say -O > /tmp/modules.txt || true
+          cat /tmp/modules.txt
+          grep -q 'voicegarden-spd' /tmp/modules.txt
+          if ls /usr/lib/*/speech-dispatcher-modules/sd_espeak-ng* >/dev/null 2>&1; then
+            grep -q 'espeak-ng' /tmp/modules.txt
+          fi
           spd-say -o voicegarden-spd -L > /tmp/voices.txt || { cat /tmp/voices.txt; exit 1; }
           cat /tmp/voices.txt
-          grep -q piper-nl-rdh-low#0 /tmp/voices.txt
+          grep -q piper-nl_BE-rdh-low#0 /tmp/voices.txt
           cd ~/.rust-tts-wrapper/sherpaonnx
           curl -fsSL -o p.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2
-          tar -xjf p.tar.bz2 -C piper-nl-rdh-low --strip-components=1
-          spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Package smoke test."
+          tar -xjf p.tar.bz2 -C piper-nl_BE-rdh-low --strip-components=1
+          spd-say -o voicegarden-spd -y piper-nl_BE-rdh-low#0 -w "Package smoke test."
           trap - EXIT
       - name: doctor (post-install diagnostics)
         run: voicegarden-spd doctor || true

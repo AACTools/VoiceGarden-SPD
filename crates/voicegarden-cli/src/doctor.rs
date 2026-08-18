@@ -95,14 +95,14 @@ fn doctor_impl() -> Result<(), String> {
 
     // 3. module binary + registration
     let module_paths = [
-        voicegarden_spd::installer::user_module_dir().join("sd_voicegarden"),
+        voicegarden_spd::installer::user_module_dir().join(voicegarden_spd::installer::MODULE_BIN),
         std::path::PathBuf::from(
-            "/usr/lib/x86_64-linux-gnu/speech-dispatcher-modules/sd_voicegarden",
+            "/usr/lib/x86_64-linux-gnu/speech-dispatcher-modules/sd_voicegarden-spd",
         ),
         std::path::PathBuf::from(
-            "/usr/lib/aarch64-linux-gnu/speech-dispatcher-modules/sd_voicegarden",
+            "/usr/lib/aarch64-linux-gnu/speech-dispatcher-modules/sd_voicegarden-spd",
         ),
-        std::path::PathBuf::from("/usr/lib64/speech-dispatcher-modules/sd_voicegarden"),
+        std::path::PathBuf::from("/usr/lib64/speech-dispatcher-modules/sd_voicegarden-spd"),
     ];
     let module_path = module_paths.iter().find(|p| p.exists());
     d.check(
@@ -112,6 +112,9 @@ fn doctor_impl() -> Result<(), String> {
         "not found — run `voicegarden-spd install` (user-local) or install the .deb/.rpm",
     );
 
+    // Registration: an explicit AddModule line, or auto-detection from a
+    // module directory (speech-dispatcher derives the module name from
+    // the sd_voicegarden-spd binary).
     let speechd_conf = voicegarden_spd::installer::user_speechd_config_dir().join("speechd.conf");
     let registered = |p: &std::path::Path| {
         std::fs::read_to_string(p).map(|t| {
@@ -130,13 +133,22 @@ fn doctor_impl() -> Result<(), String> {
             "/etc/speech-dispatcher/speechd.conf".to_string()
         };
         d.check(true, "registration", &format!("AddModule in {where_}"), "");
+    } else if module_path.is_some() {
+        d.check(
+            true,
+            "registration",
+            "auto-detected by speech-dispatcher from the module directory",
+            "",
+        );
     } else {
         d.check(
             false,
             "registration",
             "",
             &format!(
-                "no AddModule line in {} or /etc/speech-dispatcher/speechd.conf — run `voicegarden-spd install` or reinstall the package",
+                "no AddModule line in {} or /etc/speech-dispatcher/speechd.conf and no module \
+                 binary in a module directory — run `voicegarden-spd install` or reinstall the \
+                 package",
                 speechd_conf.display()
             ),
         );

@@ -59,6 +59,10 @@ pub enum Outcome {
     Completed,
     /// STOP/PAUSE arrived mid-run; remaining audio was dropped.
     Aborted,
+    /// Synthesis produced nothing speakable; the server was told
+    /// `301 ERROR CANT SPEAK` so the failure is visible to the daemon
+    /// (and `spd-say`/clients) instead of masquerading as success.
+    Failed,
 }
 
 /// One word-boundary event relayed by the engine.
@@ -177,10 +181,21 @@ enum Msg {
     Done(Result<(), String>),
 }
 
-/// Run one utterance end to end. Reports BEGIN before and END after —
-/// unconditionally, so the server's speak monitor always terminates even
-/// when synthesis fails (a failed utterance is just silent). On abort
-/// (STOP/PAUSE) remaining audio is dropped.
+/// Run one utterance end to end, owning the whole SPEAK reply sequence.
+///
+/// The reply to the server's terminating dot is deferred until synthesis
+/// has actually produced audio (issue #1): the server blocks on that
+/// reply with no timeout, which is the module protocol's only channel
+/// for reporting a failed utterance. So:
+///
+/// * first PCM chunk ready → `200 OK SPEAKING`, `701 BEGIN`, then audio
+///   streams as it arrives and `702 END` closes the utterance;
+/// * synthesis fails or yields **zero audio** → `301 ERROR CANT SPEAK`
+///   and no events — the daemon logs the failure and drops the message
+///   instead of reporting a silent success;
+/// * STOP/PAUSE before any audio → the handshake is still completed
+///   (`200 OK SPEAKING` + BEGIN + END) because the server is waiting
+///   for the reply; no audio is sent.
 ///
 /// * `synth_text` — what the engine receives (may be SSML for
 ///   passthrough-capable engines; timing marks are stripped from it).
@@ -201,8 +216,7 @@ pub fn speak(
     stop_flag: &Arc<AtomicBool>,
     poll: &dyn Fn(),
 ) -> Outcome {
-    unsafe { glue::module_report_event_begin() };
-    let outcome = speak_inner(
+    speak_inner(
         &engine,
         voice,
         synth_text,
@@ -212,12 +226,11 @@ pub fn speak(
         chunk_ms,
         stop_flag,
         poll,
-    );
-    unsafe { glue::module_report_event_end() };
-    outcome
+    )
 }
 
-/// Stream pre-decoded PCM16 mono (sound icons) with begin/end events.
+/// Stream pre-decoded PCM16 mono (sound icons) with the full
+/// begin/end event sequence.
 ///
 /// No `706 ICON` is reported: the server treats 706 as "play this file
 /// yourself" (speak_queue_send_file_to_audio) — since we already stream
@@ -229,6 +242,7 @@ pub fn stream_raw_pcm(
     stop_flag: &Arc<AtomicBool>,
     poll: &dyn Fn(),
 ) -> Outcome {
+    unsafe { glue::module_speak_ok() };
     unsafe { glue::module_report_event_begin() };
     let per_chunk =
         ((u64::from(sample_rate.max(1)) * u64::from(chunk_ms) / 1000).max(1) as usize).max(1);
@@ -267,35 +281,45 @@ fn speak_inner(
         let engine = Arc::clone(engine);
         let stop_flag = Arc::clone(stop_flag);
         move || {
-            let res = engine.speak_sync(
-                &text_owned,
-                Some(&voice_id),
-                prosody.rate_mult,
-                prosody.pitch_mult,
-                prosody.volume_mult,
-                Some(&mut |chunk: &[u8]| {
-                    if stop_flag.load(Ordering::SeqCst) {
-                        return;
-                    }
-                    let _ = tx.send(Msg::Pcm(chunk.to_vec()));
-                }),
-                Some(&mut |word, start, end, byte_offset, _len| {
-                    let _ = tx.send(Msg::Boundary(Boundary {
-                        word: word.to_string(),
-                        start,
-                        end,
-                        byte_offset,
-                    }));
-                }),
-            );
-            let _ = tx.send(Msg::Done(res.map_err(|e| e.to_string())));
+            // catch_unwind: an engine panic must surface as Err, not as a
+            // mystery "worker vanished" success-shaped silence.
+            let res = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                engine.speak_sync(
+                    &text_owned,
+                    Some(&voice_id),
+                    prosody.rate_mult,
+                    prosody.pitch_mult,
+                    prosody.volume_mult,
+                    Some(&mut |chunk: &[u8]| {
+                        if stop_flag.load(Ordering::SeqCst) {
+                            return;
+                        }
+                        let _ = tx.send(Msg::Pcm(chunk.to_vec()));
+                    }),
+                    Some(&mut |word, start, end, byte_offset, _len| {
+                        let _ = tx.send(Msg::Boundary(Boundary {
+                            word: word.to_string(),
+                            start,
+                            end,
+                            byte_offset,
+                        }));
+                    }),
+                )
+            }));
+            let done = match res {
+                Ok(Ok(())) => Ok(()),
+                Ok(Err(e)) => Err(e.to_string()),
+                Err(_) => Err("synthesis worker panicked".into()),
+            };
+            let _ = tx.send(Msg::Done(done));
         }
     });
     let worker = match worker {
         Ok(w) => w,
         Err(e) => {
             eprintln!("voicegarden-spd: failed to spawn synth thread: {e}");
-            return Outcome::Aborted;
+            unsafe { glue::module_speak_error() };
+            return Outcome::Failed;
         }
     };
 
@@ -321,6 +345,9 @@ fn speak_inner(
     let mut next_mark = 0usize; // marks fire in document order
     let mut sent_secs = 0.0f32;
     let mut done: Option<Result<(), String>> = None;
+    // Deferred SPEAK reply: nothing is sent to the server until audio
+    // actually exists (see `speak` docs) — unless the run ends first.
+    let mut started = false;
 
     loop {
         // Drain everything currently queued before deciding to wait.
@@ -342,6 +369,13 @@ fn speak_inner(
 
         // Stream whatever a full chunk allows while data keeps flowing.
         while pending.len() >= samples_per_chunk && !stop_flag.load(Ordering::SeqCst) {
+            if !started {
+                // First audio: complete the SPEAK handshake and open the
+                // event sequence.
+                unsafe { glue::module_speak_ok() };
+                unsafe { glue::module_report_event_begin() };
+                started = true;
+            }
             let chunk: Vec<i16> = pending.drain(..samples_per_chunk).collect();
             send_pcm(&chunk, rate);
             #[allow(clippy::cast_precision_loss)]
@@ -387,15 +421,45 @@ fn speak_inner(
     }
     let _ = worker.join();
 
-    // Final flush: remaining samples, then all unfired marks (boundary set
-    // is now closed, so every mark is mappable).
-    if !stop_flag.load(Ordering::SeqCst) {
+    if started {
+        // Final flush: remaining samples, then all unfired marks (boundary
+        // set is now closed, so every mark is mappable). Skipped on abort:
+        // the remaining audio is dropped.
+        let aborted = stop_flag.load(Ordering::SeqCst);
+        if !aborted {
+            while !pending.is_empty() {
+                let take = pending.len().min(samples_per_chunk);
+                let chunk: Vec<i16> = pending.drain(..take).collect();
+                send_pcm(&chunk, rate);
+            }
+            let _ = sent_secs; // audio position no longer needed once flushing
+            fire_due_marks(
+                marks,
+                &mut next_mark,
+                &words,
+                &boundaries,
+                time_scale,
+                f32::INFINITY,
+                true,
+            );
+        }
+        unsafe { glue::module_report_event_end() };
+        if aborted {
+            Outcome::Aborted
+        } else {
+            Outcome::Completed
+        }
+    } else if !pending.is_empty() {
+        // Sub-chunk utterance (audio shorter than one ChunkMs block —
+        // e.g. a single spoken character): the streaming loop never saw a
+        // full chunk, so open the event sequence now and flush it.
+        unsafe { glue::module_speak_ok() };
+        unsafe { glue::module_report_event_begin() };
         while !pending.is_empty() {
             let take = pending.len().min(samples_per_chunk);
             let chunk: Vec<i16> = pending.drain(..take).collect();
             send_pcm(&chunk, rate);
         }
-        let _ = sent_secs; // audio position no longer needed once flushing
         fire_due_marks(
             marks,
             &mut next_mark,
@@ -405,9 +469,25 @@ fn speak_inner(
             f32::INFINITY,
             true,
         );
+        unsafe { glue::module_report_event_end() };
         Outcome::Completed
-    } else {
+    } else if stop_flag.load(Ordering::SeqCst) {
+        // Cancelled before any audio. The server is still waiting for the
+        // SPEAK reply, so complete the handshake with no audio between
+        // the events (the server's speak queue turns END-after-stop into
+        // the right client-side stop event).
+        unsafe { glue::module_speak_ok() };
+        unsafe { glue::module_report_event_begin() };
+        unsafe { glue::module_report_event_end() };
         Outcome::Aborted
+    } else {
+        // Nothing speakable came out of the engine. Report the failure —
+        // never a silent success (issue #1).
+        if matches!(&done, Some(Ok(()))) {
+            eprintln!("voicegarden-spd: synthesis produced no audio");
+        }
+        unsafe { glue::module_speak_error() };
+        Outcome::Failed
     }
 }
 

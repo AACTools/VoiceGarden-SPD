@@ -237,7 +237,7 @@ pub(crate) fn load_cfg(cfg_path: Option<&str>) -> ModuleConfig {
 // ---------------------------------------------------------------------------
 
 fn cmd_install(models_dir: Option<&str>, restart: bool) -> Result<(), String> {
-    let module = find_binary("sd_voicegarden")?;
+    let module = find_binary(voicegarden_spd::installer::MODULE_BIN)?;
     let refresh_bin = find_binary("voicegarden-spd-refresh")?;
     let steps = installer::install(&module, &refresh_bin, models_dir)?;
     for s in &steps {
@@ -329,8 +329,9 @@ fn cmd_status(cfg_path: Option<&str>) -> Result<(), String> {
             .map_or("-".into(), |p| p.display().to_string())
     );
     println!(
-        "  registered    : {}",
-        if st.registered { "yes" } else { "no" }
+        "  registered    : {} ({})",
+        if st.registered { "yes" } else { "no" },
+        st.registration_mode
     );
     println!();
     println!("  models dir    : {}", cfg.models_dir.display());

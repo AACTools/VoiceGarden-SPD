@@ -1,5 +1,5 @@
 #!/bin/sh
-# postinst — register the module with the system speech-dispatcher config.
+# postinst — make speech-dispatcher load the module after package install.
 #
 # Used by both .deb and .rpm (nfpm postinstall). POSIX sh only.
 #
@@ -9,41 +9,6 @@
 set -e
 
 CONF="${VGSPD_CONF:-/etc/speech-dispatcher/speechd.conf}"
-
-# Resolve the absolute module path across package layouts:
-#   deb multiarch  /usr/lib/<triplet>/speech-dispatcher-modules/
-#   plain / lib64  /usr/lib{,64}/speech-dispatcher-modules/        (rpm)
-# speechd resolves bare AddModule names against its own default
-# ModulesDir, which does not match the multiarch install dir on Debian,
-# so the absolute path is required.
-MODULE_BIN=""
-for candidate in \
-    /usr/lib/*/speech-dispatcher-modules/sd_voicegarden \
-    /usr/lib/speech-dispatcher-modules/sd_voicegarden \
-    /usr/lib64/speech-dispatcher-modules/sd_voicegarden
-do
-    if [ -x "$candidate" ]; then
-        MODULE_BIN="$candidate"
-        break
-    fi
-done
-
-if [ -z "$MODULE_BIN" ]; then
-    echo "voicegarden-spd: WARNING sd_voicegarden binary not found where the" >&2
-    echo "  package expected it — not registering. Report this as a bug." >&2
-else
-    LINE="AddModule \"voicegarden-spd\" \"$MODULE_BIN\" \"voicegarden-spd.conf\""
-    if [ -f "$CONF" ]; then
-        if ! grep -q 'AddModule "voicegarden-spd"' "$CONF" 2>/dev/null; then
-            printf '%s\n' "$LINE" >> "$CONF"
-            echo "voicegarden-spd: registered module in $CONF"
-        fi
-    else
-        echo "voicegarden-spd: $CONF not found (speech-dispatcher not configured yet?);" \
-             "add this line once it exists:" >&2
-        echo "  $LINE" >&2
-    fi
-fi
 
 # speech-dispatcher >= 0.12 is required (server-side audio + speak queue).
 # Warn loudly rather than hard-depend so users on older distros get an
@@ -60,6 +25,52 @@ if command -v speech-dispatcher >/dev/null 2>&1; then
             echo "  Ubuntu 25.04+, Fedora 41+), or remove this package." >&2
         fi
     fi
+fi
+
+# Registration:
+#
+# speech-dispatcher auto-detects modules from its module directories while
+# NO AddModule line is configured. Appending one to a conf that relies on
+# auto-detection would silently drop every other output module (espeak-ng,
+# orca's voice, …). So only add an explicit registration when the admin
+# already uses AddModule lines; otherwise the packaged
+# sd_voicegarden-spd binary is picked up by auto-detection on restart.
+
+found_binary=0
+for candidate in \
+    /usr/lib/*/speech-dispatcher-modules/sd_voicegarden-spd \
+    /usr/lib/speech-dispatcher-modules/sd_voicegarden-spd \
+    /usr/lib64/speech-dispatcher-modules/sd_voicegarden-spd
+do
+    if [ -x "$candidate" ]; then
+        found_binary=1
+        break
+    fi
+done
+
+if [ "$found_binary" -ne 1 ]; then
+    echo "voicegarden-spd: WARNING sd_voicegarden-spd binary not found where the" >&2
+    echo "  package expected it — not registering. Report this as a bug." >&2
+    exit 0
+fi
+
+if [ ! -f "$CONF" ]; then
+    echo "voicegarden-spd: $CONF not found (speech-dispatcher not configured yet?);" >&2
+    echo "  the module will be auto-detected once speech-dispatcher is set up." >&2
+    exit 0
+fi
+
+if grep -Eq '^[[:space:]]*AddModule' "$CONF" 2>/dev/null; then
+    # The admin registers modules explicitly (auto-detection is already
+    # off) — add ours in the same style.
+    if ! grep -q 'AddModule "voicegarden-spd"' "$CONF" 2>/dev/null; then
+        printf 'AddModule "voicegarden-spd" "%s" "voicegarden-spd.conf"\n' \
+            "$candidate" >> "$CONF"
+        echo "voicegarden-spd: registered module in $CONF"
+    fi
+else
+    echo "voicegarden-spd: $CONF relies on module auto-detection — left untouched;"
+    echo "  speech-dispatcher will discover sd_voicegarden-spd on restart."
 fi
 
 echo

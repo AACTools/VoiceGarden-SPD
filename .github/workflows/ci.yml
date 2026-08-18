@@ -41,7 +41,7 @@ jobs:
       - uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
           toolchain: stable
-      # The fake-server suite spawns sd_voicegarden and drives the real
+      # The fake-server suite spawns sd_voicegarden-spd and drives the real
       # (vendored) module protocol code — no daemon needed.
       - run: cargo test
 
@@ -70,7 +70,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build module + tools
-        run: cargo build --bin sd_voicegarden --bin voicegarden-spd
+        run: cargo build --bin sd_voicegarden-spd --bin voicegarden-spd --bin voicegarden-spd-refresh
 
       - name: Start PulseAudio with a null sink
         run: |
@@ -80,34 +80,65 @@ jobs:
           pactl info || (echo "pulse failed to start"; exit 1)
           pactl load-module module-null-sink sink_name=voicegarden || true
 
-      - name: Register module with user speechd config
+      - name: Install user-locally via the CLI (auto-detection path)
         run: |
-          mkdir -p ~/.config/speech-dispatcher/modules
-          cp config/voicegarden-spd.conf ~/.config/speech-dispatcher/modules/
-          cat > ~/.config/speech-dispatcher/speechd.conf <<EOF
-          AddModule "voicegarden-spd" "$GITHUB_WORKSPACE/target/debug/sd_voicegarden" "voicegarden-spd.conf"
-          EOF
+          # The real installer (issue #2 regression path): no speechd.conf
+          # is written — the module must be auto-detected from the user
+          # module directory. This also exercises the installer's creation
+          # of ~/.local/share: speech-dispatcher resolves its user module
+          # dir as ~/.local/share/../libexec/speech-dispatcher-modules,
+          # and without that directory the `..` hop fails and the whole
+          # user module dir is silently skipped.
+          "$GITHUB_WORKSPACE/target/debug/voicegarden-spd" install --no-restart
+          test -x ~/.local/libexec/speech-dispatcher-modules/sd_voicegarden-spd
+          test -d ~/.local/share
 
-      - name: LIST VOICES with a stub model
+      - name: LIST VOICES with a stub model (and other modules intact)
         run: |
-          mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low
-          touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low/placeholder
+          mkdir -p ~/.rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low
+          touch ~/.rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low/placeholder
           speech-dispatcher --spawn
           sleep 2
+          spd-say -O | tee /tmp/modules.txt
+          grep -q 'voicegarden-spd' /tmp/modules.txt
+          # The whole point of the auto-detection install: other modules
+          # (e.g. espeak-ng) must still be there (issue #2).
+          if ls /usr/lib/*/speech-dispatcher-modules/sd_espeak-ng* >/dev/null 2>&1 \
+             || ls /usr/lib/speech-dispatcher-modules/sd_espeak-ng* >/dev/null 2>&1; then
+             grep -q 'espeak-ng' /tmp/modules.txt
+          fi
           spd-say -o voicegarden-spd -L | tee /tmp/voices.txt
-          grep -q 'piper-nl-rdh-low#0' /tmp/voices.txt
+          grep -q 'piper-nl_BE-rdh-low#0' /tmp/voices.txt
+
+      - name: Failed synthesis must surface as an error (issue #1)
+        run: |
+          # The stub model produces no audio: the module must answer SPEAK
+          # with 301 ERROR CANT SPEAK so the daemon logs a real error
+          # instead of playing back a silent success.
+          spd-say -o voicegarden-spd -y piper-nl_BE-rdh-low#0 "this cannot synthesize"
+          sleep 3
+          LOG=/root/.cache/speech-dispatcher/log/speech-dispatcher.log
+          [ -f "$LOG" ] || LOG="$XDG_RUNTIME_DIR/speech-dispatcher/log/speech-dispatcher.log"
+          tail -n 50 "$LOG" || true
+          grep -E "Can't say message|Module reported error" "$LOG" \
+            || { echo "no module error logged for failed synthesis"; exit 1; }
+          # Fresh daemon for the real-model run below.
+          speech-dispatcher --terminate || pkill speech-dispatcher || true
+          sleep 1
 
       - name: SPEAK with a real model (end-to-end audio)
         run: |
           cd ~/.rust-tts-wrapper/sherpaonnx
           curl -fsSL -o piper.tar.bz2 \
             https://github.com/k2-fsa/sherpa-onnx/releases/download/tts-models/vits-piper-nl_BE-rdh-x_low.tar.bz2
-          mkdir -p piper-nl-rdh-low
-          tar -xjf piper.tar.bz2 -C piper-nl-rdh-low --strip-components=1
+          mkdir -p piper-nl_BE-rdh-low
+          tar -xjf piper.tar.bz2 -C piper-nl_BE-rdh-low --strip-components=1
           rm piper.tar.bz2
-          spd-say -o voicegarden-spd -y piper-nl-rdh-low#0 -w "Hello from the VoiceGarden speech dispatcher module."
+          speech-dispatcher --spawn
+          sleep 2
+          spd-say -o voicegarden-spd -y piper-nl_BE-rdh-low#0 -w "Hello from the VoiceGarden speech dispatcher module."
 
       - name: Bench (informational — cold vs warm synthesis)
         run: |
           "$GITHUB_WORKSPACE/target/debug/voicegarden-spd" bench \
-            piper-nl-rdh-low#0 "The quick brown fox jumps over the lazy dog." 3
+            piper-nl_BE-rdh-low#0 "The quick brown fox jumps over the lazy dog." 3

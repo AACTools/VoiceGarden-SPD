@@ -325,7 +325,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -917,7 +917,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1073,8 +1073,8 @@ dependencies = [
 
 [[package]]
 name = "rust-tts-wrapper"
-version = "0.1.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.3.18#703f27cd605e1db8b6961f2bec445a6c7998d991"
+version = "0.3.20"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.3.20#b73b1f597ce23ec53146c59e2625ea75df40267f"
 dependencies = [
  "anyhow",
  "base64",
@@ -1108,7 +1108,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1303,9 +1303,9 @@ dependencies = [
 
 [[package]]
 name = "speechmarkdown-rust"
-version = "0.4.12"
+version = "0.4.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "352abc5896eea87314dcaf10e5eaf8f3abdd8d6b7dbd874781b73d2b731b4229"
+checksum = "f5ff3afebeb2aacf8c5d6fdcd9c218d542d814b0db913a941e8abaa8c8b321c0"
 dependencies = [
  "ipa-translate",
  "quick-xml",
@@ -1444,7 +1444,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

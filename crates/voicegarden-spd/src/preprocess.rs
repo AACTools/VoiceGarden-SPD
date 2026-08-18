@@ -225,15 +225,22 @@ pub fn xml_escape(s: &str) -> String {
 /// engine spells with its own prosody — better than our comma-separated
 /// letter approximation. Only used when the voice is SSML-capable and the
 /// client didn't send SSML of its own.
+///
+/// The envelope carries `version`/`xmlns`/`xml:lang` — Edge/Azure return
+/// zero audio for a bare `<speak>` (issue #1).
 #[must_use]
-pub fn spelling_ssml(text: &str) -> String {
-    let mut out = String::from("<speak>");
+pub fn spelling_ssml(text: &str, lang: &str) -> String {
+    use crate::ssml::{xml_lang_attr_safe, SSML_XMLNS};
+    let mut out = format!(
+        "<speak version='1.0' xmlns='{SSML_XMLNS}' xml:lang='{}'>",
+        xml_lang_attr_safe(lang)
+    );
     for word in text.split_whitespace() {
         out.push_str("<say-as interpret-as=\"characters\">");
         out.push_str(&xml_escape(word));
         out.push_str("</say-as> ");
     }
-    if out.len() > "<speak>".len() {
+    if out.ends_with(' ') {
         out.pop(); // trailing space
     }
     out.push_str("</speak>");
@@ -326,8 +333,9 @@ mod tests {
     #[test]
     fn spelling_ssml_wraps_words() {
         assert_eq!(
-            spelling_ssml("hi yo"),
-            "<speak><say-as interpret-as=\"characters\">hi</say-as> \
+            spelling_ssml("hi yo", "en"),
+            "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en'>\
+             <say-as interpret-as=\"characters\">hi</say-as> \
              <say-as interpret-as=\"characters\">yo</say-as></speak>"
         );
     }
@@ -336,7 +344,7 @@ mod tests {
     fn spelling_ssml_escapes_markup() {
         // split_whitespace yields three words: "a<b", "&", "c>" — each
         // must be escaped inside its say-as element.
-        let ssml = spelling_ssml("a<b & c>");
+        let ssml = spelling_ssml("a<b & c>", "en");
         assert!(ssml.contains("a&lt;b"), "escaped <: {ssml}");
         assert!(ssml.contains("&amp;"), "escaped &: {ssml}");
         assert!(ssml.contains("c&gt;"), "escaped >: {ssml}");
@@ -345,6 +353,9 @@ mod tests {
 
     #[test]
     fn spelling_ssml_empty() {
-        assert_eq!(spelling_ssml(""), "<speak></speak>");
+        assert_eq!(
+            spelling_ssml("", "en"),
+            "<speak version='1.0' xmlns='http://www.w3.org/2001/10/synthesis' xml:lang='en'></speak>"
+        );
     }
 }

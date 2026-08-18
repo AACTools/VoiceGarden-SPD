@@ -1,10 +1,11 @@
-//! Fake-server integration test: spawn `sd_voicegarden` and drive the
+//! Fake-server integration test: spawn `sd_voicegarden-spd` and drive the
 //! real speech-dispatcher module protocol over its stdin/stdout pipes.
 //!
 //! This exercises the actual `libspeechd_module` machinery (INIT
 //! handshake, SET parsing, LIST VOICES, SPEAK flow, event replies) —
 //! without a speechd daemon or any TTS engine (a placeholder model means
-//! synthesis fails silently, but the protocol framing must stay valid).
+//! synthesis fails, which must surface as `301 ERROR CANT SPEAK`, never
+//! as a silent success).
 //!
 //! Lines are `\n`-terminated; multi-line data blocks end with `.`.
 //! Reading is byte-oriented because 705 AUDIO events carry binary data.
@@ -33,7 +34,7 @@ impl Drop for Module {
 
 impl Module {
     fn spawn(extra_env: &[(&str, &str)]) -> Self {
-        let mut cmd = Command::new(env!("CARGO_BIN_EXE_sd_voicegarden"));
+        let mut cmd = Command::new(env!("CARGO_BIN_EXE_sd_voicegarden-spd"));
         // Default HOME first so extra_env entries can override it.
         let home = std::env::temp_dir().join(format!("vgspd-test-{}", std::process::id()));
         std::fs::create_dir_all(&home).unwrap();
@@ -42,7 +43,7 @@ impl Module {
             cmd.env(k, v);
         }
         cmd.stdin(Stdio::piped()).stdout(Stdio::piped());
-        let mut child = cmd.spawn().expect("spawn sd_voicegarden");
+        let mut child = cmd.spawn().expect("spawn sd_voicegarden-spd");
         let stdin = child.stdin.take().expect("stdin");
         let stdout = child.stdout.take().expect("stdout");
         // Reader thread: raw lines in, channel out — every read becomes
@@ -89,7 +90,7 @@ impl Module {
     }
 
     /// True when a line is a `NNN-` continuation (code position only —
-    /// voice-list entries like `200-piper-nl-rdh-low#0\tnl\t` contain
+    /// voice-list entries like `200-piper-nl_BE-rdh-low#0\tnl\t` contain
     /// hyphens in the payload and must NOT be treated as continuations).
     fn is_continuation(l: &str) -> bool {
         let b = l.as_bytes();
@@ -206,12 +207,14 @@ fn speak_without_voices_reports_cant_speak() {
 }
 
 #[test]
-fn speak_with_stub_voice_streams_protocol_events() {
+fn failed_synthesis_reports_cant_speak() {
     // Install a placeholder model directory so exactly one sherpa voice
-    // exists. Synthesis fails (no real onnx files) but the protocol must
-    // produce: 200 OK SPEAKING → 701 BEGIN → 702 END.
+    // exists. Synthesis fails (no real onnx files) — the failure must
+    // surface as `301 ERROR CANT SPEAK` with no begin/end events, so the
+    // daemon (and the client) see a failure instead of a silent success
+    // (issue #1).
     let home = std::env::temp_dir().join(format!("vgspd-speak-{}", std::process::id()));
-    let models = home.join(".rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low");
+    let models = home.join(".rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low");
     std::fs::create_dir_all(&models).unwrap();
     std::fs::write(models.join("placeholder"), b"").unwrap();
 
@@ -223,43 +226,50 @@ fn speak_with_stub_voice_streams_protocol_events() {
     assert!(
         reply
             .iter()
-            .any(|l| l.starts_with("200-piper-nl-rdh-low#0\t")),
+            .any(|l| l.starts_with("200-piper-nl_BE-rdh-low#0\t")),
         "voices: {reply:?}"
     );
 
     m.send("SET");
-    m.send_block("rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n");
+    m.send_block(
+        "rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl_BE-rdh-low#0\n.\n",
+    );
     m.line();
     m.line();
 
-    m.send("SPEAK");
-    assert_eq!(m.line(), "202 OK RECEIVING MESSAGE");
-    m.send_block("hello <mark name=\"m1\"/> world\n.\n");
-    assert_eq!(m.line(), "200 OK SPEAKING");
-    assert_eq!(m.line(), "701 BEGIN");
-    assert_eq!(m.line(), "702 END");
+    // Plain text and a speech-dispatcher-style <speak> envelope (with an
+    // index mark) both fail the same way: visible failure, no events.
+    for text in [
+        "hello <mark name=\"m1\"/> world",
+        "<speak>Repeat <mark name=\"__spd_0\"/> test</speak>",
+    ] {
+        m.send("SPEAK");
+        assert_eq!(m.line(), "202 OK RECEIVING MESSAGE");
+        m.send_block(&format!("{text}\n.\n"));
+        assert_eq!(m.line(), "301 ERROR CANT SPEAK");
+    }
 }
 
 #[test]
 fn stop_is_acknowledged_between_utterances() {
     let home = std::env::temp_dir().join(format!("vgspd-stop-{}", std::process::id()));
-    let models = home.join(".rust-tts-wrapper/sherpaonnx/piper-nl-rdh-low");
+    let models = home.join(".rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low");
     std::fs::create_dir_all(&models).unwrap();
     std::fs::write(models.join("placeholder"), b"").unwrap();
 
     let m = Module::spawn(&[("HOME", home.to_str().unwrap())]);
     let mut m = init(m);
     m.send("SET");
-    m.send_block("rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl-rdh-low#0\n.\n");
+    m.send_block(
+        "rate=0\npitch=0\nvolume=0\nlanguage=en\nsynthesis_voice=piper-nl_BE-rdh-low#0\n.\n",
+    );
     m.line();
     m.line();
 
     m.send("SPEAK");
     m.line(); // 202
     m.send_block("first\n.\n");
-    m.line(); // 200 OK SPEAKING
-    m.line(); // 701 BEGIN
-    m.line(); // 702 END
+    m.line(); // 301 ERROR CANT SPEAK (placeholder model)
 
     // STOP outside of speech is simply accepted (module_stop returns 0,
     // the library has no STOP reply).
