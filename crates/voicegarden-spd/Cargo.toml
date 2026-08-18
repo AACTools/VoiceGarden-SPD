@@ -8,7 +8,11 @@ repository.workspace = true
 authors.workspace = true
 
 [[bin]]
-name = "sd_voicegarden"
+# Named sd_voicegarden-spd so speech-dispatcher's module auto-detection
+# derives the module name "voicegarden-spd" from the binary (issue #2:
+# an explicit AddModule line in a user speechd.conf disables
+# auto-detection for every other module).
+name = "sd_voicegarden-spd"
 path = "src/main.rs"
 
 [[bin]]

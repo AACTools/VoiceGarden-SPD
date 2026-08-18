@@ -2,7 +2,7 @@
 # Build .deb and .rpm packages from built binaries using nfpm.
 #
 # Usage: build-packages.sh <bin-dir> <version> <deb-arch> <rpm-arch> <triplet> <out-dir>
-#   bin-dir  — directory containing sd_voicegarden, voicegarden-spd-refresh,
+#   bin-dir  — directory containing sd_voicegarden-spd, voicegarden-spd-refresh,
 #              voicegarden-spd, and voicegarden-spd.conf (sample config)
 #   deb-arch — amd64 | arm64
 #   rpm-arch — x86_64 | aarch64
@@ -14,7 +14,7 @@ set -eu
 
 BIN_DIR="$1"; VERSION="$2"; DEB_ARCH="$3"; RPM_ARCH="$4"; TRIPLET="$5"; OUT_DIR="$6"
 
-[ -x "$BIN_DIR/sd_voicegarden" ] || { echo "missing $BIN_DIR/sd_voicegarden (build first)" >&2; exit 1; }
+[ -x "$BIN_DIR/sd_voicegarden-spd" ] || { echo "missing $BIN_DIR/sd_voicegarden-spd (build first)" >&2; exit 1; }
 for f in voicegarden-spd-refresh voicegarden-spd; do
     [ -x "$BIN_DIR/$f" ] || { echo "missing $BIN_DIR/$f" >&2; exit 1; }
 done
@@ -73,8 +73,8 @@ make_yaml() {
             echo "  - speech-dispatcher"
         fi
         echo "contents:"
-        echo "  - src: $BIN_DIR/sd_voicegarden"
-        echo "    dst: $modules_dir/sd_voicegarden"
+        echo "  - src: $BIN_DIR/sd_voicegarden-spd"
+        echo "    dst: $modules_dir/sd_voicegarden-spd"
         echo "  - src: $BIN_DIR/voicegarden-spd-refresh"
         echo "    dst: $modules_dir/voicegarden-spd-refresh"
         echo "  - src: $BIN_DIR/voicegarden-spd"

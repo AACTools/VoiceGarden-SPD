@@ -1,4 +1,4 @@
-//! sd_voicegarden — VoiceGarden speech-dispatcher output module.
+//! sd_voicegarden-spd — VoiceGarden speech-dispatcher output module.
 //!
 //! Binary layout mirrors upstream `module_main.c`: read config, perform
 //! the INIT handshake, then run `module_loop` (blocking `module_process`).

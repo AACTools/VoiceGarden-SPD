@@ -22,13 +22,13 @@ sha256sums_aarch64=('SKIP')
 package() {
     cd "${srcdir}/voicegarden-spd-v${pkgver}-${CARCH}-linux"
 
-    install -Dm755 sd_voicegarden \
-        "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden"
+    install -Dm755 sd_voicegarden-spd \
+        "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden-spd"
     # Arch's speech-dispatcher looks in /usr/lib/speech-dispatcher-modules
     # (no multiarch triplet); install there instead.
     install -dm755 "${pkgdir}/usr/lib/speech-dispatcher-modules"
-    mv "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden" \
-       "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden"
+    mv "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules/sd_voicegarden-spd" \
+       "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden-spd"
     rmdir -p "${pkgdir}/usr/lib/${CARCH}-unknown-linux-gnu/speech-dispatcher-modules" 2>/dev/null || true
 
     install -Dm755 voicegarden-spd-refresh \
@@ -38,7 +38,8 @@ package() {
         "${pkgdir}/etc/speech-dispatcher/modules/voicegarden-spd.conf"
     install -Dm644 LICENSE "${pkgdir}/usr/share/licenses/${pkgname}/LICENSE"
 
-    # Register with the system speechd config on install (Arch ships it
-    # commented-out by default; append when missing).
-    install -Dm644 /dev/null "${pkgdir}/etc/speech-dispatcher/speechd.conf.d/voicegarden.conf"  2>/dev/null || true
+    # No speechd.conf edit: Arch's stock config registers no modules, so
+    # speech-dispatcher auto-detects sd_voicegarden-spd from
+    # /usr/lib/speech-dispatcher-modules. Appending an AddModule line
+    # would disable auto-detection for every other module.
 }

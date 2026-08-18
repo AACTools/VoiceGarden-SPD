@@ -11,14 +11,15 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 - **Streaming audio** — cloud PCM is handed to the speech-dispatcher server as chunks arrive from the network (rust-tts-wrapper decodes MP3 incrementally); sherpa-onnx models stream sentence batches as each sentence finishes synthesising
 - **Word highlighting** — `<mark>` index marks (including speechd's own `__spd_N` pause marks) are mapped to engine word timings and reported in sync with playback: real timings for Azure/Edge/Google, progressively-anchored estimates elsewhere. Verified end-to-end with a raw SSIP client (marks arrive as each word is spoken).
 - **Stop/pause/resume** — STOP lands within ~`ChunkMs` of audio; PAUSE aborts and speechd re-speaks from the pause mark on resume (same behaviour as stock modules)
-- **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper. `<mark>` tags are timed by the module itself either way.
+- **SSML passthrough** — clients that enable SSML mode get their markup delivered to SSML-capable engines (Azure, Edge, Google): `<prosody>`, `<break>`, `<say-as>`, `<sub>` etc. all work, and SpeechMarkdown converts inside rust-tts-wrapper. `<mark>` tags are timed by the module itself either way. Envelopes are normalised on the way through — speech-dispatcher's bare `<speak>` wrapper (and SSML missing `version`/`xmlns`/`xml:lang`) is upgraded to a full document, since Edge/Azure silently return no audio otherwise.
+- **Failures are reported, never silent** — an utterance the engine can't synthesise (or that yields no audio) reaches speech-dispatcher as `301 ERROR CANT SPEAK`, so the daemon logs it and clients can tell, instead of a success-shaped silence.
 - **Accessibility modes** — punctuation announcement (`some`/`most`/`all`), spelling mode, and capital-letter recognition. Spelling uses native SSML `<say-as interpret-as="characters">` on SSML-capable engines (Azure/Edge/Google) and a text approximation elsewhere; punctuation and capitals are applied as text preprocessing (the engines don't implement them natively)
 - **Sound icons** — `SOUND_ICON` messages play the named file from `SoundIconFolder` (Debian's `sound-icons` package provides the standard set), falling back to speaking the icon name
 - **No root needed** — the installer puts everything under `~/.local` and `~/.config`
 
 ## Install
 
-**Requires speech-dispatcher 0.12+** (Debian 13+, Ubuntu 25.04+, Fedora 41+, Arch, openSUSE Tumbleweed). On older releases the module loads but speech cannot play — `voicegarden-spd doctor` explains if you hit this.
+**Requires speech-dispatcher 0.12+** (Debian 13+, Ubuntu 25.04+, Fedora 41+, Arch, openSUSE Tumbleweed — Ubuntu 24.04's stock `0.12.0-rc2` also works). On older releases the module loads but speech cannot play — `voicegarden-spd doctor` explains if you hit this.
 
 ### One-liner (recommmended)
 
@@ -41,7 +42,7 @@ spd-say -o voicegarden-spd "Hello from VoiceGarden"
 | Fedora / openSUSE | download the `.rpm`, then `sudo dnf install ./voicegarden-spd-*.rpm` |
 | Arch | AUR: `voicegarden-spd-bin` (release) / `voicegarden-spd-git` (PKGBUILDs in [`packaging/aur/`](packaging/aur)) |
 
-The packages register the module system-wide (`/etc/speech-dispatcher`) and warn at install time if speech-dispatcher is older than 0.12.
+The packages install the module into speech-dispatcher's system module directory, where the daemon auto-detects it (no `speechd.conf` edit). If your `/etc/speech-dispatcher/speechd.conf` already registers modules with `AddModule` lines, an `AddModule "voicegarden-spd"` line is added in the same style instead. Installation warns if speech-dispatcher is older than 0.12.
 
 ### User-local (no root)
 
@@ -51,7 +52,7 @@ curl -fsSL .../install.sh | sh -s -- --user
 ./target/release/voicegarden-spd install
 ```
 
-Installs to `~/.local/libexec/speech-dispatcher-modules`, writes `~/.config/speech-dispatcher/modules/voicegarden-spd.conf`, adds the `AddModule` line to your user `speechd.conf`, and restarts the daemon automatically (`--no-restart` to skip).
+Installs to `~/.local/libexec/speech-dispatcher-modules/sd_voicegarden-spd` and writes `~/.config/speech-dispatcher/modules/voicegarden-spd.conf`. speech-dispatcher **auto-detects** the module from its user module directory (the `voicegarden-spd` name comes from the binary), so nothing is written to your `speechd.conf` — a user `speechd.conf` containing only an `AddModule` line would disable auto-detection and drop every other output module from the session. If you maintain a user `speechd.conf` that already lists other modules, the installer manages an explicit `AddModule` line in it instead. The daemon is restarted automatically (`--no-restart` to skip).
 
 ### From source
 
@@ -144,7 +145,7 @@ Orca / Firefox / Okular / Qt apps / spd-say
         │ SSIP
   speech-dispatcher (unmodified)
         │ module protocol (stdin/stdout)
-  sd_voicegarden            ← this repo
+  sd_voicegarden-spd        ← this repo
         │ rust-tts-wrapper (Rust API, no C ABI)
         ├─ sherpa-onnx (local models, PCM16 direct)
         └─ cloud engines (crate decodes MP3→PCM16 mono incrementally)
@@ -173,7 +174,7 @@ Engine instances — and for sherpa-onnx, the loaded ONNX model — are cached f
 Measure it yourself:
 
 ```bash
-voicegarden-spd bench piper-nl-rdh-low#0 "The quick brown fox jumps over the lazy dog." 5
+voicegarden-spd bench piper-nl_BE-rdh-low#0 "The quick brown fox jumps over the lazy dog." 5
 ```
 
 CI runs the same bench on every push (informational; see the smoke job log). With `LOGLEVEL` set to 4+ in `speechd.conf`, the module logs the exact text each engine receives — handy when debugging preprocessing/passthrough.
@@ -216,6 +217,6 @@ git tag v0.2.1 && git push --tags
 - **Local sherpa-onnx models stream per sentence batch** (first sentence's audio starts playing while later sentences synthesise); a *single-sentence* utterance still completes synthesis before its audio flows — inherent to sentence-batched generation. Cloud engines stream as bytes arrive; engines whose APIs return one JSON document with base64 audio (Google, ElevenLabs `with-timestamps`) deliver only after the response completes — an API limitation.
 - **Cloud PCM rates are declared, not signalled.** rust-tts-wrapper delivers PCM16 mono through `on_audio` without a rate, so the module supplies the provider's fixed rate (24 kHz for Azure/Cartesia/Edge/OpenAI/…, 44.1 kHz for ElevenLabs). Non-default provider output formats could therefore play at the wrong speed.
 - **Estimated word timings** (all engines except Azure/Edge/Google) fire progressively, anchored to delivered audio — accurate pacing, but the estimate itself assumes ~150 wpm, so word positions can drift within a sentence on unusually fast/slow voices. Real-timing engines report exact positions.
-- If a sherpa model directory matches a registry id but its files fail to load inside the C++ runtime (incomplete download, corrupt archive, or an unsupported variant such as fp16), every utterance through it is dropped (BEGIN/END with no audio) — **re-running does not help**; it fails deterministically until the model is fixed or removed. `voicegarden-spd doctor` validates every installed model (load + synthesis, crash-isolated) and tells you exactly which one is broken; `model find` flags fp16 archives before you download them.
+- If a sherpa model directory matches a registry id but its files fail to load inside the C++ runtime (incomplete download, corrupt archive, or an unsupported variant such as fp16), every utterance through it fails with `301 ERROR CANT SPEAK` (visible in the daemon log) — **re-running does not help**; it fails deterministically until the model is fixed or removed. `voicegarden-spd doctor` validates every installed model (load + synthesis, crash-isolated) and tells you exactly which one is broken; `model find` flags fp16 archives before you download them.
 - Punctuation/spelling/capital expansions are English wordings ("comma", "period"); localisation would need per-language tables.
 - SSML passthrough ignores the SSIP rate/pitch/volume parameters for the utterance (prosody in the markup wins) — plain-text speech applies them as before.

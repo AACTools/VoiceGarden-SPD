@@ -31,8 +31,8 @@ package() {
     cd "${srcdir}/VoiceGarden-SPD"
 
     install -dm755 "${pkgdir}/usr/lib/speech-dispatcher-modules"
-    install -Dm755 target/release/sd_voicegarden \
-        "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden"
+    install -Dm755 target/release/sd_voicegarden-spd \
+        "${pkgdir}/usr/lib/speech-dispatcher-modules/sd_voicegarden-spd"
     install -Dm755 target/release/voicegarden-spd-refresh \
         "${pkgdir}/usr/lib/speech-dispatcher-modules/voicegarden-spd-refresh"
     install -Dm755 target/release/voicegarden-spd \

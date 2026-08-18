@@ -1,4 +1,4 @@
-//! VoiceGarden-SPD internals shared between the `sd_voicegarden` module
+//! VoiceGarden-SPD internals shared between the `sd_voicegarden-spd` module
 //! binary, the `voicegarden-spd-refresh` helper, and the `voicegarden-spd`
 //! management CLI.
 
