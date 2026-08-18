@@ -1073,8 +1073,8 @@ dependencies = [
 
 [[package]]
 name = "rust-tts-wrapper"
-version = "0.1.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.3.18#703f27cd605e1db8b6961f2bec445a6c7998d991"
+version = "0.3.19"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.3.19#7b28eac1cfb02f6383f99bfe0fa8045dceed42db"
 dependencies = [
  "anyhow",
  "base64",
