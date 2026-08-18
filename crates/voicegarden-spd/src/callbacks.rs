@@ -379,9 +379,11 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
         // SSML passthrough: engines that accept SSML receive the client's
         // markup (minus <mark> tags, which this module times itself). This
         // gives clients <prosody>/<break>/<say-as>/<sub> and SpeechMarkdown
-        // (converted inside rust-tts-wrapper's speak()). The envelope is
-        // upgraded to a full document — Edge/Azure return zero audio for
-        // a bare <speak> (issue #1).
+        // (converted inside rust-tts-wrapper's speak()). rust-tts-wrapper
+        // >= v0.3.20 normalizes the <speak> envelope for azure/edge itself;
+        // the module-side upgrade is still applied for google, for
+        // envelope-less SSML fragments (the wrapper would treat those as
+        // plain text), and as defense in depth (issue #1).
         match processed.ssml.as_deref().filter(|_| voice.ssml_capable) {
             Some(markup) => {
                 prepared_ssml = ssml::ensure_ssml_document(markup, &voice.language);

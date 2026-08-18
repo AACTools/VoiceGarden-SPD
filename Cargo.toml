@@ -4,7 +4,7 @@ members = ["crates/voicegarden-spd", "crates/voicegarden-cli"]
 
 [workspace.dependencies]
 # Pinned to a tagged rust-tts-wrapper release; bump on the next release.
-rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag = "v0.3.19", default-features = false, features = [
+rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag = "v0.3.20", default-features = false, features = [
     "sherpaonnx",
     "cloud",
 ] }
