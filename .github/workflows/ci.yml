@@ -70,8 +70,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build module + tools
-        run: cargo build --bin sd_voicegarden-spd --bin voicegarden-spd \
-                          --bin voicegarden-spd-refresh
+        run: cargo build --bin sd_voicegarden-spd --bin voicegarden-spd --bin voicegarden-spd-refresh
 
       - name: Start PulseAudio with a null sink
         run: |
