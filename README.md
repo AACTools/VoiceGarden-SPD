@@ -189,6 +189,18 @@ cargo fmt --all
 
 CI (`.github/workflows/ci.yml`): rustfmt + clippy + tests, plus a **real-speechd smoke job** that registers the freshly built module with a real speech-dispatcher + PulseAudio null sink on the runner, checks LIST VOICES with a stub model, and synthesises a real Piper model end-to-end through `spd-say`.
 
+### End-to-end check
+
+`scripts/e2e-check.sh` synthesises through every installed local model plus edge/azure/google/openai (whichever have credentials) and reports PASS/FAIL with byte counts:
+
+```bash
+scripts/e2e-check.sh                                        # local + edge + daemon view
+MICROSOFT_TOKEN=… MICROSOFT_REGION=… scripts/e2e-check.sh  # + azure (creds verified live)
+GOOGLE_API_KEY=… scripts/e2e-check.sh                      # + google
+```
+
+The edge/azure checks include the bare `<speak>` envelope shape speech-dispatcher sends — a regression check for the silent zero-audio failure. Engines without credentials are skipped, not failed.
+
 ### Verified against
 
 - speech-dispatcher 0.12.1 (Debian): `spd-say -L`, wait-mode synthesis, mid-utterance STOP, PAUSE/RESUME round-trip, index-mark notifications to a raw SSIP client (Azure real word timings)
