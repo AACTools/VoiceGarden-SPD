@@ -103,6 +103,19 @@ pub fn install(
     install_file(refresh_src, &refresh_dst)?;
     steps.push(format!("installed {}", refresh_dst.display()));
 
+    // speech-dispatcher resolves its user module directory as
+    // `~/.local/share/../libexec/speech-dispatcher-modules`. The `..` hop
+    // needs `~/.local/share` to exist — on a fresh HOME (CI containers,
+    // headless users) it doesn't, and auto-detection silently skips the
+    // whole user module directory. Creating it is harmless either way.
+    let share_dir = PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".local/share");
+    if !share_dir.is_dir() && std::fs::create_dir_all(&share_dir).is_ok() {
+        steps.push(format!(
+            "created {} (speech-dispatcher's user module dir path hops through it)",
+            share_dir.display()
+        ));
+    }
+
     // Module config: start from the shipped sample, override ModelsDir.
     let conf_dir = user_speechd_config_dir().join("modules");
     std::fs::create_dir_all(&conf_dir).map_err(|e| e.to_string())?;

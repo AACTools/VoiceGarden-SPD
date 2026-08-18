@@ -80,17 +80,18 @@ jobs:
           pactl info || (echo "pulse failed to start"; exit 1)
           pactl load-module module-null-sink sink_name=voicegarden || true
 
-      - name: Install module into the user module directory (auto-detection)
+      - name: Install user-locally via the CLI (auto-detection path)
         run: |
-          # No speechd.conf is written: speech-dispatcher auto-detects
-          # modules while no AddModule line exists (issue #2 regression
-          # path). The binary name derives the module name
-          # "voicegarden-spd".
-          mkdir -p ~/.local/libexec/speech-dispatcher-modules \
-                   ~/.config/speech-dispatcher/modules
-          cp "$GITHUB_WORKSPACE/target/debug/sd_voicegarden-spd" \
-             ~/.local/libexec/speech-dispatcher-modules/
-          cp config/voicegarden-spd.conf ~/.config/speech-dispatcher/modules/
+          # The real installer (issue #2 regression path): no speechd.conf
+          # is written — the module must be auto-detected from the user
+          # module directory. This also exercises the installer's creation
+          # of ~/.local/share: speech-dispatcher resolves its user module
+          # dir as ~/.local/share/../libexec/speech-dispatcher-modules,
+          # and without that directory the `..` hop fails and the whole
+          # user module dir is silently skipped.
+          "$GITHUB_WORKSPACE/target/debug/voicegarden-spd" install --no-restart
+          test -x ~/.local/libexec/speech-dispatcher-modules/sd_voicegarden-spd
+          test -d ~/.local/share
 
       - name: LIST VOICES with a stub model (and other modules intact)
         run: |
