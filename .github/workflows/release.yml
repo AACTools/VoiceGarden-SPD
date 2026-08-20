@@ -43,6 +43,9 @@ jobs:
         # libstdc++.so version requirement at all (matches the repo's
         # oldest-glibc policy). RUSTFLAGS reach every crate build.
         run: |
+          # gcc-13 (and its libstdc++) lives in ubuntu-toolchain-r
+          sudo add-apt-repository -y ppa:ubuntu-toolchain-r/test
+          sudo apt-get update
           sudo apt-get install -y libstdc++-13-dev
           echo "RUSTFLAGS=-C link-arg=-Bstatic -C link-arg=-lstdc++ -C link-arg=-Bdynamic" >> "$GITHUB_ENV"
 
