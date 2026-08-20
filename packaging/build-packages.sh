@@ -83,11 +83,7 @@ make_yaml() {
         # $ORIGIN/../lib resolves for the module; the CLI lives in
         # /usr/bin so its ../lib is /usr/lib — put a copy there under
         # a private name and rely on the same rpath)
-        if [ -d "$BIN_DIR/lib" ]; then
-            echo "  - src: $BIN_DIR/lib/"
-            echo "    dst: /usr/lib/voicegarden-spd/"
-            echo "    type: tree"
-        fi
+
         echo "  - src: $CONF"
         echo "    dst: /etc/speech-dispatcher/modules/voicegarden-spd.conf"
         echo "    type: config|noreplace"
