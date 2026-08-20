@@ -35,6 +35,17 @@ jobs:
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libclang-dev
 
+      - name: Statically link a new-enough libstdc++ (ort requirement)
+        # ort's prebuilt libonnxruntime.a references GLIBCXX_3.4.31
+        # symbols (GCC 13+); ubuntu-22.04 ships GCC 12. Installing
+        # libstdc++-13-dev and static-linking libstdc++ resolves the
+        # symbols at build time, so the shipped binaries carry no
+        # libstdc++.so version requirement at all (matches the repo's
+        # oldest-glibc policy). RUSTFLAGS reach every crate build.
+        run: |
+          sudo apt-get install -y libstdc++-13-dev
+          echo "RUSTFLAGS=-C link-arg=-Bstatic -C link-arg=-lstdc++ -C link-arg=-Bdynamic" >> "$GITHUB_ENV"
+
       - name: Verify tag matches crate version
         run: |
           TAG="${GITHUB_REF_NAME#v}"
