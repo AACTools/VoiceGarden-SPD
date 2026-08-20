@@ -79,6 +79,15 @@ make_yaml() {
         echo "    dst: $modules_dir/voicegarden-spd-refresh"
         echo "  - src: $BIN_DIR/voicegarden-spd"
         echo "    dst: /usr/bin/voicegarden-spd"
+        # bundled GCC-13 libstdc++ (ort's onnxruntime needs it; rpath
+        # $ORIGIN/../lib resolves for the module; the CLI lives in
+        # /usr/bin so its ../lib is /usr/lib — put a copy there under
+        # a private name and rely on the same rpath)
+        if [ -d "$BIN_DIR/lib" ]; then
+            echo "  - src: $BIN_DIR/lib/"
+            echo "    dst: /usr/lib/voicegarden-spd/"
+            echo "    type: tree"
+        fi
         echo "  - src: $CONF"
         echo "    dst: /etc/speech-dispatcher/modules/voicegarden-spd.conf"
         echo "    type: config|noreplace"
