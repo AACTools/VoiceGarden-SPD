@@ -57,8 +57,10 @@ jobs:
       HOME: /root
       XDG_RUNTIME_DIR: /tmp/xdg
     steps:
+      # libssl-dev: ort-sys's binary downloader (ureq v3) links openssl
+      # at build time (native-tls default) — needed by the floravox engine.
       - run: apt-get update && apt-get install -y --no-install-recommends
-             ca-certificates curl bzip2 build-essential pkg-config
+             ca-certificates curl bzip2 build-essential pkg-config libssl-dev
              speech-dispatcher speech-dispatcher-audio-plugins
              pulseaudio pulseaudio-utils git
 
