@@ -38,6 +38,11 @@ pub struct VgVoice {
     pub engine_voice_id: String,
     /// Credentials JSON for engine construction.
     pub credentials: String,
+    /// Safety net for the local-engine default: (engine id, credentials)
+    /// to retry with when the primary engine fails before any audio
+    /// flowed (e.g. floravox cannot load an unexpected graph variant).
+    /// `None` when there is no meaningful alternative.
+    pub fallback: Option<(String, String)>,
     /// Sample rate when statically known (sherpa registry); None for cloud.
     pub sample_rate: Option<u32>,
     /// PCM sample rate the engine delivers via `on_audio`.
@@ -214,80 +219,23 @@ pub struct CachedVoice {
     pub lang: String,
 }
 
-/// Scan the same model directories for voices the floravox engine can
-/// drive (registry `engines` field: vits/mms/matcha/kokoro). Every
-/// drivable installed model also becomes a floravox voice alongside its
-/// sherpa voice, with SSML and measured word timings.
-pub fn local_floravox_voices(models_dirs: &[std::path::PathBuf], num_threads: i32) -> Vec<VgVoice> {
-    let registry_engine = SherpaOnnxEngine::new("{}");
-    let registry = registry_engine.available_models();
-
-    let mut voices = Vec::new();
-    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for models_dir in models_dirs {
-        let Ok(entries) = std::fs::read_dir(models_dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let Some(id) = entry.file_name().to_str().map(str::to_string) else {
-                continue;
-            };
-            if !entry.path().is_dir() || !seen.insert(id.clone()) {
-                continue;
-            }
-            let Some(info) = registry.get(&id) else {
-                continue;
-            };
-            // Registry `engines` field: which engine can drive this
-            // family. floravox = vits/mms/matcha/kokoro graphs (SSML,
-            // measured word timings); the audio-LM families stay on
-            // sherpa-onnx.
-            if info.engines != "floravox" {
-                continue;
-            }
-            let langs: Vec<String> = info.language.iter().map(|l| l.lang_code.clone()).collect();
-            let lang = langs.first().cloned().unwrap_or_default();
-            let num_speakers = info.num_speakers.max(1);
-            for sid in 0..num_speakers {
-                voices.push(VgVoice {
-                    spd_name: format!("floravox-{id}#{sid}"),
-                    language: lang.clone(),
-                    variant: String::new(),
-                    engine_id: "floravox".into(),
-                    engine_voice_id: id.clone(),
-                    // lang routes the published lexicon bundle
-                    // (voicegarden-lexicons) for this voice's language;
-                    // modelId is the installed directory name.
-                    credentials: serde_json::json!({
-                        "modelsDir": models_dir.to_string_lossy(),
-                        "modelId": id,
-                        "lang": lang,
-                        "numThreads": num_threads.to_string(),
-                    })
-                    .to_string(),
-                    sample_rate: Some(info.sample_rate),
-                    pcm_rate: info.sample_rate,
-                    ssml_capable: true,
-                    display_name: format!("{} (floravox)", info.name),
-                    gender: "Unknown".into(),
-                    quality: info.quality.clone(),
-                    model_type: info.model_type.clone(),
-                    languages: langs.clone(),
-                    multilingual: langs.len() > 1,
-                    license: info.license.clone(),
-                    num_speakers: info.num_speakers,
-                });
-            }
-        }
-    }
-    voices
-}
-
-/// Scan the model directories (primary first, then legacy fallbacks)
-/// against the sherpa-onnx registry and produce one voice per
-/// (installed model × speaker). A model found in an earlier directory
-/// wins; duplicates are skipped.
-pub fn local_sherpa_voices(models_dirs: &[std::path::PathBuf], num_threads: i32) -> Vec<VgVoice> {
+/// Build one voice per installed model, driven by the configured local
+/// engine (`ModuleConfig::local_engine`, default floravox):
+///
+/// * drivable family (registry `engines` field: vits/mms/matcha/kokoro)
+///   with floravox preferred results in a floravox voice (native SSML,
+///   SpeechMarkdown, measured word timings, plus a sherpa fallback for
+///   load failures)
+/// * everything else results in a sherpa-onnx voice (the only engine
+///   that can)
+///
+/// Voice names stay `<id>#<speaker>` either way, so saved selections keep
+/// working when the engine preference flips.
+pub fn local_voices(
+    models_dirs: &[std::path::PathBuf],
+    num_threads: i32,
+    engine_pref: &str,
+) -> Vec<VgVoice> {
     let registry_engine = SherpaOnnxEngine::new("{}");
     let registry = registry_engine.available_models();
 
@@ -312,40 +260,81 @@ pub fn local_sherpa_voices(models_dirs: &[std::path::PathBuf], num_threads: i32)
             let multilingual = langs.len() > 1;
             let num_speakers = info.num_speakers.max(1);
             for sid in 0..num_speakers {
-                voices.push(VgVoice {
-                    spd_name: format!("{id}#{sid}"),
-                    language: lang.clone(),
-                    variant: String::new(),
-                    engine_id: "sherpaonnx".into(),
-                    engine_voice_id: sid.to_string(),
-                    // SherpaOnnxEngine::new parses credentials as
-                    // HashMap<String, String>, so every value must be a
-                    // string (a JSON number makes the whole parse fail
-                    // silently and the engine comes up with no model).
-                    // modelPath points at the directory the model was
-                    // actually found in, so legacy layouts load in place.
-                    credentials: serde_json::json!({
-                        "modelPath": models_dir.to_string_lossy(),
-                        "modelId": id,
-                        "numThreads": num_threads.to_string(),
-                    })
-                    .to_string(),
-                    sample_rate: Some(info.sample_rate),
-                    pcm_rate: info.sample_rate,
-                    ssml_capable: false,
-                    display_name: if num_speakers > 1 {
-                        format!("{} (speaker {sid})", info.name)
-                    } else {
-                        info.name.clone()
-                    },
-                    gender: "Unknown".into(),
-                    quality: info.quality.clone(),
-                    model_type: info.model_type.clone(),
-                    languages: langs.clone(),
-                    multilingual,
-                    license: info.license.clone(),
-                    num_speakers: info.num_speakers,
-                });
+                let display = if num_speakers > 1 {
+                    format!("{} (speaker {sid})", info.name)
+                } else {
+                    info.name.clone()
+                };
+                let drivable = matches!(
+                    info.model_type.as_str(),
+                    "vits" | "mms" | "matcha" | "kokoro"
+                );
+                if drivable && engine_pref == "floravox" {
+                    voices.push(VgVoice {
+                        spd_name: format!("{id}#{sid}"),
+                        language: lang.clone(),
+                        variant: String::new(),
+                        engine_id: "floravox".into(),
+                        engine_voice_id: id.clone(),
+                        // lang routes the published lexicon bundle
+                        // (voicegarden-lexicons) for this voice's language.
+                        credentials: serde_json::json!({
+                            "modelsDir": models_dir.to_string_lossy(),
+                            "modelId": id,
+                            "lang": lang,
+                            "numThreads": num_threads.to_string(),
+                        })
+                        .to_string(),
+                        // If floravox cannot load this model's graph,
+                        // speak through sherpa-onnx instead of failing.
+                        fallback: Some((
+                            "sherpaonnx".into(),
+                            serde_json::json!({
+                                "modelPath": models_dir.to_string_lossy(),
+                                "modelId": id,
+                                "numThreads": num_threads.to_string(),
+                            })
+                            .to_string(),
+                        )),
+                        sample_rate: Some(info.sample_rate),
+                        pcm_rate: info.sample_rate,
+                        ssml_capable: true,
+                        display_name: display.clone(),
+                        gender: "Unknown".into(),
+                        quality: info.quality.clone(),
+                        model_type: info.model_type.clone(),
+                        languages: langs.clone(),
+                        multilingual,
+                        license: info.license.clone(),
+                        num_speakers: info.num_speakers,
+                    });
+                } else {
+                    voices.push(VgVoice {
+                        spd_name: format!("{id}#{sid}"),
+                        language: lang.clone(),
+                        variant: String::new(),
+                        engine_id: "sherpaonnx".into(),
+                        engine_voice_id: sid.to_string(),
+                        credentials: serde_json::json!({
+                            "modelPath": models_dir.to_string_lossy(),
+                            "modelId": id,
+                            "numThreads": num_threads.to_string(),
+                        })
+                        .to_string(),
+                        fallback: None,
+                        sample_rate: Some(info.sample_rate),
+                        pcm_rate: info.sample_rate,
+                        ssml_capable: false,
+                        display_name: display.clone(),
+                        gender: "Unknown".into(),
+                        quality: info.quality.clone(),
+                        model_type: info.model_type.clone(),
+                        languages: langs.clone(),
+                        multilingual,
+                        license: info.license.clone(),
+                        num_speakers: info.num_speakers,
+                    });
+                }
             }
         }
     }
@@ -382,6 +371,7 @@ pub fn cloud_voices(cache: &VoiceCache, credentials: &serde_json::Value) -> Vec<
                 || v.name.to_lowercase().contains("multilingual");
             voices.push(VgVoice {
                 spd_name: format!("{engine_id}/{}", v.id),
+                fallback: None,
                 language: v.lang.clone(),
                 variant: variant_for_gender(&v.gender),
                 engine_id: engine_id.clone(),
@@ -422,8 +412,7 @@ fn variant_for_gender(gender: &str) -> String {
 /// The full merged voice list for a config: local models first, then the
 /// cached cloud voices of credentialed engines (+ edge).
 pub fn merged_voices(cfg: &crate::config::ModuleConfig) -> Vec<VgVoice> {
-    let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
-    list.extend(local_floravox_voices(&cfg.models_dirs(), cfg.num_threads));
+    let mut list = local_voices(&cfg.models_dirs(), cfg.num_threads, &cfg.local_engine);
     let cache = load_voice_cache(&cfg.voice_cache_file);
     let credentials = load_credentials(&cfg.credentials_file);
     list.extend(cloud_voices(&cache, &credentials));
@@ -441,6 +430,63 @@ pub fn load_credentials(path: &Path) -> serde_json::Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_voices_default_to_floravox_for_drivable_families() {
+        let dir = tempfile::tempdir().unwrap();
+        // piper-en_US-lessac-high is in the real registry (vits family)
+        let vits = dir.path().join("piper-en_US-lessac-high");
+        std::fs::create_dir_all(&vits).unwrap();
+        // a kitten-family id that exists in the registry
+        let kitten = dir.path().join("micro-en-v0_8");
+        std::fs::create_dir_all(&kitten).unwrap();
+
+        let fv = local_voices(&[dir.path().to_path_buf()], 2, "floravox");
+        assert_eq!(fv.len(), 2, "{fv:?}");
+        let vits_v = fv.iter().find(|v| v.spd_name.starts_with("piper")).unwrap();
+        assert_eq!(vits_v.engine_id, "floravox");
+        assert!(vits_v.ssml_capable);
+        // plain name, no engine prefix
+        assert_eq!(vits_v.spd_name, "piper-en_US-lessac-high#0");
+        // sherpa fallback attached
+        let (fb_id, fb_creds) = vits_v.fallback.as_ref().unwrap();
+        assert_eq!(fb_id, "sherpaonnx");
+        assert!(fb_creds.contains("\"modelPath\""));
+        // kitten stays on sherpa (audio-LM family)
+        let kitten_v = fv
+            .iter()
+            .find(|v| v.spd_name.starts_with("micro-en"))
+            .unwrap();
+        assert_eq!(kitten_v.engine_id, "sherpaonnx");
+        assert!(!kitten_v.ssml_capable);
+        assert!(kitten_v.fallback.is_none());
+    }
+
+    #[test]
+    fn local_voices_sherpa_pref_restores_sherpa_for_everything() {
+        let dir = tempfile::tempdir().unwrap();
+        let vits = dir.path().join("piper-en_US-lessac-high");
+        std::fs::create_dir_all(&vits).unwrap();
+        let sv = local_voices(&[dir.path().to_path_buf()], 2, "sherpaonnx");
+        assert_eq!(sv.len(), 1);
+        assert_eq!(sv[0].engine_id, "sherpaonnx");
+        assert!(!sv[0].ssml_capable);
+        // same plain name: saved selections survive the preference flip
+        assert_eq!(sv[0].spd_name, "piper-en_US-lessac-high#0");
+    }
+
+    #[test]
+    fn local_engine_config_parses_and_rejects() {
+        let mut cfg = crate::config::ModuleConfig::default();
+        assert_eq!(cfg.local_engine, "floravox");
+        cfg.apply("LocalEngine sherpaonnx\n");
+        assert_eq!(cfg.local_engine, "sherpaonnx");
+        cfg.apply("LocalEngine nonsense\n");
+        assert_eq!(
+            cfg.local_engine, "sherpaonnx",
+            "invalid value must not change it"
+        );
+    }
 
     #[test]
     fn cache_roundtrip_and_cloud_voices() {
@@ -498,6 +544,7 @@ mod tests {
             engine_id: engine.into(),
             engine_voice_id: "x".into(),
             credentials: "{}".into(),
+            fallback: None,
             sample_rate: None,
             pcm_rate: 24_000,
             ssml_capable: false,

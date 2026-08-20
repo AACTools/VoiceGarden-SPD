@@ -11,7 +11,7 @@ rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag =
 ] }
 
 [workspace.package]
-version = "0.3.1"
+version = "0.4.0"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/AACTools/VoiceGarden-SPD"
