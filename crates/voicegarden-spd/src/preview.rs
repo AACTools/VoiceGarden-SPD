@@ -11,7 +11,7 @@ pub fn preview_wav(voice: &VgVoice, text: &str) -> Result<(PathBuf, Option<Strin
     let engine = rust_tts_wrapper::create_engine(&voice.engine_id, &voice.credentials)
         .ok_or_else(|| format!("engine '{}' unavailable", voice.engine_id))?;
 
-    let rate = if voice.engine_id == "sherpaonnx" {
+    let rate = if matches!(voice.engine_id.as_str(), "sherpaonnx" | "floravox") {
         voice.sample_rate.unwrap_or(22_050)
     } else {
         cloud_pcm_rate(&voice.engine_id)

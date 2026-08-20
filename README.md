@@ -7,6 +7,7 @@ Powered by [rust-tts-wrapper](https://github.com/AACTools/rust-tts-wrapper). Lin
 ## What you get
 
 - **Offline neural voices** — any sherpa-onnx model (Kokoro, Piper, Matcha, MMS, …) installed under `ModelsDir` appears as a system voice
+- **floravox voices** — every drivable installed model (piper/MMS VITS, Matcha, Kokoro) *also* appears as a `floravox-…` voice: native SSML (`<prosody>`, `<break>`, `<say-as>`, `<sub>`), SpeechMarkdown, and **measured** word timings (from the model's duration tensor) instead of estimates — so index marks and word highlighting track the actual audio. Language routing pulls the published per-language lexicon bundle automatically (`engines` field in the model registry decides which engine drives a family)
 - **Cloud voices** — 20 engines with credentials configured once in `engines.json` (see rust-tts-wrapper's catalogue; the crate's native `system` engine is deliberately **not** exposed here to avoid routing speech-dispatcher back into itself)
 - **Streaming audio** — cloud PCM is handed to the speech-dispatcher server as chunks arrive from the network (rust-tts-wrapper decodes MP3 incrementally); sherpa-onnx models stream sentence batches as each sentence finishes synthesising
 - **Word highlighting** — `<mark>` index marks (including speechd's own `__spd_N` pause marks) are mapped to engine word timings and reported in sync with playback: real timings for Azure/Edge/Google, progressively-anchored estimates elsewhere. Verified end-to-end with a raw SSIP client (marks arrive as each word is spoken).
@@ -226,6 +227,7 @@ git tag v0.2.1 && git push --tags
 
 ## Known limitations
 
+- **floravox voices stream per sentence too**, with measured per-word timing; STOP lands within ~`ChunkMs` (verified: 0.5 s on a 20 s utterance)
 - **Local sherpa-onnx models stream per sentence batch** (first sentence's audio starts playing while later sentences synthesise); a *single-sentence* utterance still completes synthesis before its audio flows — inherent to sentence-batched generation. Cloud engines stream as bytes arrive; engines whose APIs return one JSON document with base64 audio (Google, ElevenLabs `with-timestamps`) deliver only after the response completes — an API limitation.
 - **Cloud PCM rates are declared, not signalled.** rust-tts-wrapper delivers PCM16 mono through `on_audio` without a rate, so the module supplies the provider's fixed rate (24 kHz for Azure/Cartesia/Edge/OpenAI/…, 44.1 kHz for ElevenLabs). Non-default provider output formats could therefore play at the wrong speed.
 - **Estimated word timings** (all engines except Azure/Edge/Google) fire progressively, anchored to delivered audio — accurate pacing, but the estimate itself assumes ~150 wpm, so word positions can drift within a sentence on unusually fast/slow voices. Real-timing engines report exact positions.
