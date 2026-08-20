@@ -27,6 +27,10 @@ pub struct ModuleConfig {
     pub chunk_ms: u32,
     /// ONNX runtime intra-op thread count for sherpa-onnx models.
     pub num_threads: i32,
+    /// Which engine drives local model voices: "floravox" (default —
+    /// SSML, SpeechMarkdown, measured word timings) or "sherpaonnx".
+    /// Registry-decidable: audio-LM families always use sherpa-onnx.
+    pub local_engine: String,
     /// Directory of named sound-icon files (played for SOUND_ICON
     /// messages instead of speaking the name). Debian's
     /// `sound-icons` package installs to this path.
@@ -44,6 +48,7 @@ impl Default for ModuleConfig {
             default_voice: None,
             chunk_ms: 250,
             num_threads: 2,
+            local_engine: "floravox".into(),
             sound_icon_folder: "/usr/share/sounds/sound-icons".into(),
         }
     }
@@ -106,6 +111,17 @@ impl ModuleConfig {
                         if t > 0 {
                             self.num_threads = t;
                         }
+                    }
+                }
+                "LocalEngine" => {
+                    if value == "floravox" || value == "sherpaonnx" {
+                        self.local_engine = value;
+                    } else {
+                        eprintln!(
+                            "voicegarden-spd: LocalEngine must be floravox or \
+                             sherpaonnx (got {value:?}); keeping {}",
+                            self.local_engine
+                        );
                     }
                 }
                 "SoundIconFolder" => self.sound_icon_folder = value,

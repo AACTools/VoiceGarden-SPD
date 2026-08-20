@@ -273,6 +273,37 @@ fn speak_inner(
     stop_flag: &Arc<AtomicBool>,
     poll: &dyn Fn(),
 ) -> Outcome {
+    speak_engine(
+        engine,
+        voice,
+        synth_text,
+        timing_text,
+        prosody,
+        marks,
+        chunk_ms,
+        stop_flag,
+        poll,
+        true,
+    )
+}
+
+/// `allow_fallback`: one retry through `voice.fallback` when the primary
+/// engine failed before any audio flowed (e.g. floravox cannot load an
+/// unexpected graph variant → sherpa-onnx takes the utterance instead of
+/// the client hearing silence-as-success).
+#[allow(clippy::too_many_arguments)]
+fn speak_engine(
+    engine: &Arc<dyn TtsEngine>,
+    voice: &VgVoice,
+    synth_text: &str,
+    timing_text: &str,
+    prosody: Prosody,
+    marks: &[SsmlMark],
+    chunk_ms: u32,
+    stop_flag: &Arc<AtomicBool>,
+    poll: &dyn Fn(),
+    allow_fallback: bool,
+) -> Outcome {
     let (tx, rx) = mpsc::channel::<Msg>();
     let voice_id = voice.engine_voice_id.clone();
     let text_owned = synth_text.to_string();
@@ -397,6 +428,41 @@ fn speak_inner(
 
         if let Some(res) = &done {
             if let Err(e) = res {
+                // Retry through the fallback engine only when nothing has
+                // been spoken yet (a partial stream must not double-speak)
+                // and the user did not abort.
+                if allow_fallback && !started && !stop_flag.load(Ordering::SeqCst) {
+                    if let Some((fb_id, fb_creds)) = &voice.fallback {
+                        eprintln!(
+                            "voicegarden-spd: {} failed before audio ({e}); \
+                             retrying via {fb_id}",
+                            voice.engine_id
+                        );
+                        if let Some(fb_engine) = rust_tts_wrapper::create_engine(fb_id, fb_creds) {
+                            let fb_engine = Arc::new(fb_engine);
+                            let mut fb_voice = voice.clone();
+                            fb_voice.engine_id = fb_id.clone();
+                            fb_voice.credentials = fb_creds.clone();
+                            // sherpa voices are not SSML-capable
+                            fb_voice.ssml_capable = fb_id != "sherpaonnx";
+                            let _ = worker.join();
+                            // Speak the plain text on fallback: synth_text
+                            // may be SSML the fallback engine can't parse.
+                            return speak_engine(
+                                &fb_engine,
+                                &fb_voice,
+                                timing_text,
+                                timing_text,
+                                prosody,
+                                marks,
+                                chunk_ms,
+                                stop_flag,
+                                poll,
+                                false,
+                            );
+                        }
+                    }
+                }
                 eprintln!("voicegarden-spd: synthesis failed: {e}");
             }
             break;

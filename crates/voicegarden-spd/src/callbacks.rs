@@ -19,9 +19,7 @@ use crate::config::ModuleConfig;
 use crate::glue::{self, msgtype, SPDVoice, STDIN_FILENO};
 use crate::pipeline::{self, Prosody};
 use crate::ssml;
-use crate::voices::{
-    cloud_voices, load_credentials, load_voice_cache, local_sherpa_voices, VgVoice,
-};
+use crate::voices::{cloud_voices, load_credentials, load_voice_cache, local_voices, VgVoice};
 
 /// Set by STOP and PAUSE; cleared at the start of each utterance.
 static STOP_REQUESTED: LazyLock<Arc<AtomicBool>> =
@@ -217,11 +215,7 @@ pub extern "C" fn module_init(msg: *mut *mut c_char) -> c_int {
     let cfg = config();
     let credentials = load_credentials(&cfg.credentials_file);
     let cache = load_voice_cache(&cfg.voice_cache_file);
-    let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
-    list.extend(crate::voices::local_floravox_voices(
-        &cfg.models_dirs(),
-        cfg.num_threads,
-    ));
+    let mut list = local_voices(&cfg.models_dirs(), cfg.num_threads, &cfg.local_engine);
     let cloud_count = {
         let cloud = cloud_voices(&cache, &credentials);
         let n = cloud.len();

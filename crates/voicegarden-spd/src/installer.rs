@@ -345,11 +345,7 @@ pub fn status(cfg: &crate::config::ModuleConfig) -> Status {
     // module directory; explicit registration is the fallback.
     let registered = explicit || module_installed.is_some();
 
-    let mut local = crate::voices::local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
-    local.extend(crate::voices::local_floravox_voices(
-        &cfg.models_dirs(),
-        cfg.num_threads,
-    ));
+    let local = crate::voices::local_voices(&cfg.models_dirs(), cfg.num_threads, &cfg.local_engine);
     let cache = crate::voices::load_voice_cache(&cfg.voice_cache_file);
     let creds = crate::voices::load_credentials(&cfg.credentials_file);
     let cloud = crate::voices::cloud_voices(&cache, &creds);
