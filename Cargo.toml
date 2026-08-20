@@ -5,10 +5,11 @@ members = ["crates/voicegarden-spd", "crates/voicegarden-cli"]
 [workspace.dependencies]
 # Pinned to a tagged rust-tts-wrapper release; bump on the next release.
 rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag = "v0.4.1", default-features = false, features = [
-    "sherpaonnx",
     "cloud",
     "floravox-lexicons",
 ] }
+# Registry as typed data (model catalogue for voice search/download).
+sherpa-onnx-models = "0.1"
 
 [workspace.package]
 version = "0.4.0"

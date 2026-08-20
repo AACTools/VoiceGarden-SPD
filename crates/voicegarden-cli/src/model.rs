@@ -2,8 +2,7 @@
 //! (all 1300+ models, including ones not installed).
 
 use clap::Subcommand;
-use rust_tts_wrapper::sherpaonnx_engine::SherpaOnnxEngine;
-use rust_tts_wrapper::types::SherpaModelInfo;
+use sherpa_onnx_models::ModelInfo;
 
 use crate::Style;
 
@@ -54,11 +53,9 @@ fn find(
     multilingual: bool,
     limit: usize,
 ) -> Result<(), String> {
-    let engine = SherpaOnnxEngine::new("{}");
-    let models: Vec<&SherpaModelInfo> = engine
-        .available_models()
+    let models: Vec<&ModelInfo> = sherpa_onnx_models::models()
         .values()
-        .filter(|m| {
+        .filter(|m: &&ModelInfo| {
             if let Some(q) = quality {
                 if !m.quality.eq_ignore_ascii_case(q) {
                     return false;
@@ -102,10 +99,9 @@ fn find(
     let home = std::env::var("HOME").unwrap_or_default();
     let primary = std::path::Path::new(&home).join(".local/share/voicegarden/sherpa-onnx-models");
     let legacy = std::path::Path::new(&home).join(".rust-tts-wrapper/sherpaonnx");
-    let installed =
-        |m: &SherpaModelInfo| primary.join(&m.id).exists() || legacy.join(&m.id).exists();
+    let installed = |m: &ModelInfo| primary.join(&m.id).exists() || legacy.join(&m.id).exists();
 
-    let mut sorted: Vec<&SherpaModelInfo> = models;
+    let mut sorted: Vec<&ModelInfo> = models;
     sorted.sort_by(|a, b| {
         installed(b)
             .cmp(&installed(a))

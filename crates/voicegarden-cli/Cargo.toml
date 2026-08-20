@@ -14,6 +14,7 @@ path = "src/main.rs"
 [dependencies]
 voicegarden-spd = { path = "../voicegarden-spd" }
 rust-tts-wrapper.workspace = true
+sherpa-onnx-models.workspace = true
 clap = { version = "4", features = ["derive"] }
 rpassword = "7"
 serde = { version = "1", features = ["derive"] }

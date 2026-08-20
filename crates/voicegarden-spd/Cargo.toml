@@ -21,6 +21,7 @@ path = "src/bin/refresh.rs"
 
 [dependencies]
 rust-tts-wrapper.workspace = true
+sherpa-onnx-models.workspace = true
 libc = "0.2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

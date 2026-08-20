@@ -21,8 +21,6 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
-use rust_tts_wrapper::SherpaOnnxEngine;
-
 /// A VoiceGarden voice as presented to speech-dispatcher.
 #[derive(Debug, Clone)]
 pub struct VgVoice {
@@ -236,8 +234,7 @@ pub fn local_voices(
     num_threads: i32,
     engine_pref: &str,
 ) -> Vec<VgVoice> {
-    let registry_engine = SherpaOnnxEngine::new("{}");
-    let registry = registry_engine.available_models();
+    let registry = sherpa_onnx_models::models();
 
     let mut voices = Vec::new();
     let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
