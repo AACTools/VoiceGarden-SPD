@@ -324,15 +324,17 @@ fn speak_inner(
     };
 
     // sherpa boundaries come from the crate's 150-wpm estimator and are
-    // unaffected by the engine `speed` factor, so rescale by 1/rate; cloud
-    // timings are computed against the prosody actually applied.
-    let is_local = voice.engine_id == "sherpaonnx";
-    let rate = if is_local {
+    // unaffected by the engine `speed` factor, so rescale by 1/rate;
+    // floravox boundaries are measured against the prosody actually
+    // applied (durations tensor reflects rate), so no rescale; cloud
+    // timings likewise.
+    let is_sherpa = voice.engine_id == "sherpaonnx";
+    let rate = if matches!(voice.engine_id.as_str(), "sherpaonnx" | "floravox") {
         voice.sample_rate.unwrap_or(22_050)
     } else {
         voice.pcm_rate.max(8_000)
     };
-    let time_scale = if is_local && prosody.rate_mult > 0.0 {
+    let time_scale = if is_sherpa && prosody.rate_mult > 0.0 {
         1.0 / prosody.rate_mult
     } else {
         1.0

@@ -218,6 +218,10 @@ pub extern "C" fn module_init(msg: *mut *mut c_char) -> c_int {
     let credentials = load_credentials(&cfg.credentials_file);
     let cache = load_voice_cache(&cfg.voice_cache_file);
     let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    list.extend(crate::voices::local_floravox_voices(
+        &cfg.models_dirs(),
+        cfg.num_threads,
+    ));
     let cloud_count = {
         let cloud = cloud_voices(&cache, &credentials);
         let n = cloud.len();

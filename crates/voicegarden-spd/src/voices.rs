@@ -88,7 +88,7 @@ impl VgVoice {
     /// Local vs cloud source.
     #[must_use]
     pub fn source(&self) -> Source {
-        if self.engine_id == "sherpaonnx" {
+        if matches!(self.engine_id.as_str(), "sherpaonnx" | "floravox") {
             Source::Local
         } else {
             Source::Cloud
@@ -212,6 +212,75 @@ pub struct CachedVoice {
     pub gender: String,
     #[serde(default)]
     pub lang: String,
+}
+
+/// Scan the same model directories for voices the floravox engine can
+/// drive (registry `engines` field: vits/mms/matcha/kokoro). Every
+/// drivable installed model also becomes a floravox voice alongside its
+/// sherpa voice, with SSML and measured word timings.
+pub fn local_floravox_voices(models_dirs: &[std::path::PathBuf], num_threads: i32) -> Vec<VgVoice> {
+    let registry_engine = SherpaOnnxEngine::new("{}");
+    let registry = registry_engine.available_models();
+
+    let mut voices = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for models_dir in models_dirs {
+        let Ok(entries) = std::fs::read_dir(models_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let Some(id) = entry.file_name().to_str().map(str::to_string) else {
+                continue;
+            };
+            if !entry.path().is_dir() || !seen.insert(id.clone()) {
+                continue;
+            }
+            let Some(info) = registry.get(&id) else {
+                continue;
+            };
+            // Registry `engines` field: which engine can drive this
+            // family. floravox = vits/mms/matcha/kokoro graphs (SSML,
+            // measured word timings); the audio-LM families stay on
+            // sherpa-onnx.
+            if info.engines != "floravox" {
+                continue;
+            }
+            let langs: Vec<String> = info.language.iter().map(|l| l.lang_code.clone()).collect();
+            let lang = langs.first().cloned().unwrap_or_default();
+            let num_speakers = info.num_speakers.max(1);
+            for sid in 0..num_speakers {
+                voices.push(VgVoice {
+                    spd_name: format!("floravox-{id}#{sid}"),
+                    language: lang.clone(),
+                    variant: String::new(),
+                    engine_id: "floravox".into(),
+                    engine_voice_id: id.clone(),
+                    // lang routes the published lexicon bundle
+                    // (voicegarden-lexicons) for this voice's language;
+                    // modelId is the installed directory name.
+                    credentials: serde_json::json!({
+                        "modelsDir": models_dir.to_string_lossy(),
+                        "modelId": id,
+                        "lang": lang,
+                        "numThreads": num_threads.to_string(),
+                    })
+                    .to_string(),
+                    sample_rate: Some(info.sample_rate),
+                    pcm_rate: info.sample_rate,
+                    ssml_capable: true,
+                    display_name: format!("{} (floravox)", info.name),
+                    gender: "Unknown".into(),
+                    quality: info.quality.clone(),
+                    model_type: info.model_type.clone(),
+                    languages: langs.clone(),
+                    multilingual: langs.len() > 1,
+                    license: info.license.clone(),
+                    num_speakers: info.num_speakers,
+                });
+            }
+        }
+    }
+    voices
 }
 
 /// Scan the model directories (primary first, then legacy fallbacks)
@@ -354,6 +423,7 @@ fn variant_for_gender(gender: &str) -> String {
 /// cached cloud voices of credentialed engines (+ edge).
 pub fn merged_voices(cfg: &crate::config::ModuleConfig) -> Vec<VgVoice> {
     let mut list = local_sherpa_voices(&cfg.models_dirs(), cfg.num_threads);
+    list.extend(local_floravox_voices(&cfg.models_dirs(), cfg.num_threads));
     let cache = load_voice_cache(&cfg.voice_cache_file);
     let credentials = load_credentials(&cfg.credentials_file);
     list.extend(cloud_voices(&cache, &credentials));
