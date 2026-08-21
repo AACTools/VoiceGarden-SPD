@@ -267,21 +267,26 @@ pub fn local_voices(
                     "vits" | "mms" | "matcha" | "kokoro"
                 );
                 if drivable && engine_pref == "floravox" {
+                    // lang routes the published lexicon bundle
+                    // (voicegarden-lexicons) for phoneme-map voices;
+                    // MMS-style character-table voices are auto-detected
+                    // by the engine and must NOT get lang — a lexicon
+                    // would phonemize characters.
+                    let mut creds = serde_json::json!({
+                        "modelsDir": models_dir.to_string_lossy(),
+                        "modelId": id,
+                        "numThreads": num_threads.to_string(),
+                    });
+                    if info.model_type != "mms" {
+                        creds["lang"] = serde_json::Value::String(lang.clone());
+                    }
                     voices.push(VgVoice {
                         spd_name: format!("{id}#{sid}"),
                         language: lang.clone(),
                         variant: String::new(),
                         engine_id: "floravox".into(),
                         engine_voice_id: id.clone(),
-                        // lang routes the published lexicon bundle
-                        // (voicegarden-lexicons) for this voice's language.
-                        credentials: serde_json::json!({
-                            "modelsDir": models_dir.to_string_lossy(),
-                            "modelId": id,
-                            "lang": lang,
-                            "numThreads": num_threads.to_string(),
-                        })
-                        .to_string(),
+                        credentials: creds.to_string(),
                         // If floravox cannot load this model's graph,
                         // speak through sherpa-onnx instead of failing.
                         fallback: Some((
