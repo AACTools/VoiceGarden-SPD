@@ -83,11 +83,15 @@ pub fn parse_wav(bytes: &[u8]) -> Result<WavData, String> {
 
     let samples: Vec<i16> = match (bits, channels) {
         (16, 1) => data
-            .chunks_exact(2)
-            .map(|p| i16::from_le_bytes([p[0], p[1]]))
+            .as_chunks::<2>()
+            .0
+            .iter()
+            .map(|p| i16::from_le_bytes(*p))
             .collect(),
         (16, 2) => data
-            .chunks_exact(4)
+            .as_chunks::<4>()
+            .0
+            .iter()
             .map(|p| {
                 let l = i16::from_le_bytes([p[0], p[1]]) as i32;
                 let r = i16::from_le_bytes([p[2], p[3]]) as i32;

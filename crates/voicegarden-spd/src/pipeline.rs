@@ -635,8 +635,8 @@ fn send_pcm(chunk: &[i16], rate: u32) {
 /// Append little-endian PCM16 bytes to a `Vec<i16>`.
 fn append_le_bytes(pcm: &mut Vec<i16>, bytes: &[u8]) {
     pcm.reserve(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        pcm.push(i16::from_le_bytes([pair[0], pair[1]]));
+    for pair in bytes.as_chunks::<2>().0 {
+        pcm.push(i16::from_le_bytes(*pair));
     }
 }
 
