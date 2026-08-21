@@ -339,7 +339,7 @@ fn cmd_status(cfg_path: Option<&str>) -> Result<(), String> {
     println!("  voice cache   : {}", cfg.voice_cache_file.display());
     println!();
     println!(
-        "  voices        : {} local (sherpa-onnx), {} cloud (cache)",
+        "  voices        : {} local (offline), {} cloud (cache)",
         st.local_voices, st.cloud_voices
     );
     if st.cloud_voices == 0 {

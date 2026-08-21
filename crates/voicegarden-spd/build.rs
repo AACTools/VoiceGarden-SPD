@@ -15,5 +15,4 @@ fn main() {
         .compile("vgspd_module_proto");
 
     println!("cargo:rerun-if-changed={}", vendor.display());
-
 }

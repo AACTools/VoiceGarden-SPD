@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use clap::Subcommand;
 use voicegarden_spd::config::ModuleConfig;
-use voicegarden_spd::voices::merged_voices;
+use voicegarden_spd::voices::{merged_voices, Source};
 
 use crate::Style;
 
@@ -159,7 +159,7 @@ fn doctor_impl() -> Result<(), String> {
     let voices = merged_voices(&cfg);
     let local = voices
         .iter()
-        .filter(|v| v.engine_id == "sherpaonnx")
+        .filter(|v| v.source() == Source::Local)
         .count();
     let cloud = voices.len() - local;
     d.info(
@@ -179,7 +179,7 @@ fn doctor_impl() -> Result<(), String> {
             false,
             "voice availability",
             "",
-            "no voices at all — put a sherpa-onnx model under the models dir (see `model find`), or run `engine add <engine>`",
+            "no voices at all — put a local model under the models dir (see `model find`), or run `engine add <engine>`",
         );
     } else {
         doctor_check_models(&mut d, &cfg);
@@ -233,9 +233,15 @@ fn doctor_impl() -> Result<(), String> {
 /// Per-model load + synthesis validation (subprocess-isolated).
 fn doctor_check_models(d: &mut Doctor, cfg: &ModuleConfig) {
     use std::collections::BTreeSet;
-    let models: BTreeSet<String> = merged_voices(cfg)
+    // One check per local model (spd_name is `<model>#<speaker>` for
+    // both engines): keep the first voice of each model.
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    let models: Vec<String> = merged_voices(cfg)
         .into_iter()
-        .filter(|v| v.engine_id == "sherpaonnx" && v.engine_voice_id == "0")
+        .filter(|v| {
+            v.source() == Source::Local
+                && seen.insert(v.spd_name.split('#').next().unwrap_or_default().to_string())
+        })
         .map(|v| v.spd_name)
         .collect();
     if models.is_empty() {
@@ -298,7 +304,7 @@ pub(crate) fn check_model(voice_name: &str) -> Result<(), String> {
     let cfg = ModuleConfig::load(None);
     let v = merged_voices(&cfg)
         .into_iter()
-        .find(|v| v.spd_name == voice_name && v.engine_id == "sherpaonnx")
+        .find(|v| v.spd_name == voice_name && v.source() == Source::Local)
         .ok_or_else(|| format!("voice '{voice_name}' not found"))?;
 
     let engine = rust_tts_wrapper::create_engine(&v.engine_id, &v.credentials)
