@@ -190,9 +190,14 @@ enum Msg {
 ///
 /// * first PCM chunk ready → `200 OK SPEAKING`, `701 BEGIN`, then audio
 ///   streams as it arrives and `702 END` closes the utterance;
-/// * synthesis fails or yields **zero audio** → `301 ERROR CANT SPEAK`
-///   and no events — the daemon logs the failure and drops the message
-///   instead of reporting a silent success;
+/// * synthesis fails or yields **zero audio** → the handshake is
+///   completed as an **empty utterance** (`200 OK SPEAKING` + `701
+///   BEGIN` + `702 END`, no audio). A bare `301 ERROR CANT SPEAK`
+///   leaves the waiting client blocked forever: speech-dispatcher
+///   drops the failed message without emitting any client-facing
+///   event (speaking.c drops it on the module-error return), so
+///   `spd-say -w` never returns (issue #7). The failure is still
+///   diagnosed on stderr;
 /// * STOP/PAUSE before any audio → the handshake is still completed
 ///   (`200 OK SPEAKING` + BEGIN + END) because the server is waiting
 ///   for the reply; no audio is sent.
@@ -348,8 +353,7 @@ fn speak_engine(
     let worker = match worker {
         Ok(w) => w,
         Err(e) => {
-            eprintln!("voicegarden-spd: failed to spawn synth thread: {e}");
-            unsafe { glue::module_speak_error() };
+            complete_empty_utterance(&format!("failed to spawn synth thread: {e}"));
             return Outcome::Failed;
         }
     };
@@ -549,14 +553,40 @@ fn speak_engine(
         unsafe { glue::module_report_event_end() };
         Outcome::Aborted
     } else {
-        // Nothing speakable came out of the engine. Report the failure —
-        // never a silent success (issue #1).
-        if matches!(&done, Some(Ok(()))) {
-            eprintln!("voicegarden-spd: synthesis produced no audio");
+        // Nothing speakable came out of the engine. Complete the
+        // handshake as an empty utterance so the waiting client unblocks
+        // (a bare 301 makes speech-dispatcher drop the message without a
+        // client event — an indefinite hang for `spd-say -w`); the
+        // failure is diagnosed on stderr (issues #1 + #7).
+        match &done {
+            Some(Ok(())) => {
+                complete_empty_utterance("synthesis produced no audio");
+            }
+            Some(Err(e)) => {
+                complete_empty_utterance(&format!("synthesis failed: {e}"));
+            }
+            None => {
+                complete_empty_utterance("synthesis ended without a result");
+            }
         }
-        unsafe { glue::module_speak_error() };
         Outcome::Failed
     }
+}
+
+/// Complete the SPEAK handshake for an utterance that will produce no
+/// audio: `200 OK SPEAKING` + `701 BEGIN` + `702 END` (empty utterance).
+///
+/// The server is blocked waiting for the SPEAK reply and would leave the
+/// client's end-of-speech wait hanging if we replied `301 ERROR CANT
+/// SPEAK`: speech-dispatcher drops the failed message without notifying
+/// the client (verified against speechd 0.12.0/0.12.1 speaking.c). An
+/// empty-but-complete utterance unblocks the client; the reason is
+/// diagnosed on stderr (issue #7).
+pub(crate) fn complete_empty_utterance(reason: &str) {
+    eprintln!("voicegarden-spd: {reason}");
+    unsafe { glue::module_speak_ok() };
+    unsafe { glue::module_report_event_begin() };
+    unsafe { glue::module_report_event_end() };
 }
 
 /// Emit marks whose (now-known) time has been reached. Only marks whose
@@ -605,8 +635,8 @@ fn send_pcm(chunk: &[i16], rate: u32) {
 /// Append little-endian PCM16 bytes to a `Vec<i16>`.
 fn append_le_bytes(pcm: &mut Vec<i16>, bytes: &[u8]) {
     pcm.reserve(bytes.len() / 2);
-    for pair in bytes.chunks_exact(2) {
-        pcm.push(i16::from_le_bytes([pair[0], pair[1]]));
+    for pair in bytes.as_chunks::<2>().0 {
+        pcm.push(i16::from_le_bytes(*pair));
     }
 }
 

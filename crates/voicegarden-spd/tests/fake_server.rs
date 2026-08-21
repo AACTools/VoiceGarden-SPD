@@ -4,7 +4,10 @@
 //! This exercises the actual `libspeechd_module` machinery (INIT
 //! handshake, SET parsing, LIST VOICES, SPEAK flow, event replies) —
 //! without a speechd daemon or any TTS engine (a placeholder model means
-//! synthesis fails, which must surface as `301 ERROR CANT SPEAK`, never
+//! synthesis fails, which must surface as an empty-but-complete
+//! utterance (`200 OK SPEAKING` + `701 BEGIN` + `702 END`, no audio) —
+//! never as a bare 301 (which makes speech-dispatcher drop the message
+//! and leave `spd-say -w` blocked forever, issue #7) and never as a
 //! as a silent success).
 //!
 //! Lines are `\n`-terminated; multi-line data blocks end with `.`.
@@ -202,17 +205,21 @@ fn speak_without_voices_reports_cant_speak() {
     m.send("SPEAK");
     assert_eq!(m.line(), "202 OK RECEIVING MESSAGE");
     m.send_block("hello world\n.\n");
-    // No voice available → 301 ERROR CANT SPEAK.
-    assert_eq!(m.line(), "301 ERROR CANT SPEAK");
+    // No voice available → empty utterance: 200 + BEGIN + END, no audio.
+    // A bare 301 would leave the waiting client blocked forever (#7).
+    assert_eq!(m.line(), "200 OK SPEAKING");
+    assert_eq!(m.line(), "701 BEGIN");
+    assert_eq!(m.line(), "702 END");
 }
 
 #[test]
 fn failed_synthesis_reports_cant_speak() {
     // Install a placeholder model directory so exactly one sherpa voice
     // exists. Synthesis fails (no real onnx files) — the failure must
-    // surface as `301 ERROR CANT SPEAK` with no begin/end events, so the
-    // daemon (and the client) see a failure instead of a silent success
-    // (issue #1).
+    // complete the handshake as an empty utterance (200 + BEGIN + END,
+    // no audio) so the waiting client unblocks instead of hanging
+    // forever on a bare 301 (issue #7); the failure is diagnosed on
+    // stderr (issue #1).
     let home = std::env::temp_dir().join(format!("vgspd-speak-{}", std::process::id()));
     let models = home.join(".rust-tts-wrapper/sherpaonnx/piper-nl_BE-rdh-low");
     std::fs::create_dir_all(&models).unwrap();
@@ -238,7 +245,7 @@ fn failed_synthesis_reports_cant_speak() {
     m.line();
 
     // Plain text and a speech-dispatcher-style <speak> envelope (with an
-    // index mark) both fail the same way: visible failure, no events.
+    // index mark) both fail the same way: complete empty utterance.
     for text in [
         "hello <mark name=\"m1\"/> world",
         "<speak>Repeat <mark name=\"__spd_0\"/> test</speak>",
@@ -246,7 +253,9 @@ fn failed_synthesis_reports_cant_speak() {
         m.send("SPEAK");
         assert_eq!(m.line(), "202 OK RECEIVING MESSAGE");
         m.send_block(&format!("{text}\n.\n"));
-        assert_eq!(m.line(), "301 ERROR CANT SPEAK");
+        assert_eq!(m.line(), "200 OK SPEAKING");
+        assert_eq!(m.line(), "701 BEGIN");
+        assert_eq!(m.line(), "702 END");
     }
 }
 
@@ -269,7 +278,9 @@ fn stop_is_acknowledged_between_utterances() {
     m.send("SPEAK");
     m.line(); // 202
     m.send_block("first\n.\n");
-    m.line(); // 301 ERROR CANT SPEAK (placeholder model)
+    m.line(); // 200 OK SPEAKING (placeholder model fails; empty utterance)
+    m.line(); // 701 BEGIN
+    m.line(); // 702 END
 
     // STOP outside of speech is simply accepted (module_stop returns 0,
     // the library has no STOP reply).

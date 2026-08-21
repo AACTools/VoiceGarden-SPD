@@ -81,7 +81,18 @@ fn list(cfg_path: Option<&str>) -> Result<(), String> {
     let mut rows = Vec::new();
     for e in &engines {
         let configured = store.contains_key(&e.id);
-        let (cred_state, voices) = if !e.needs_credentials {
+        // Local engines have no cloud cache — count installed model
+        // voices instead (a 0 here used to hide a working setup, #8).
+        let local_count = || {
+            voicegarden_spd::voices::merged_voices(&cfg)
+                .into_iter()
+                .filter(|v| v.engine_id == e.id)
+                .count()
+                .to_string()
+        };
+        let (cred_state, voices) = if matches!(e.id.as_str(), "floravox" | "sherpaonnx") {
+            (st.dim("none needed"), local_count())
+        } else if !e.needs_credentials {
             (st.dim("none needed"), cache_count(&cfg, &e.id).to_string())
         } else if configured {
             (st.green("configured"), cache_count(&cfg, &e.id).to_string())

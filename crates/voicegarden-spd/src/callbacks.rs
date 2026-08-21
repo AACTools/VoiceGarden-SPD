@@ -304,7 +304,7 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
     // Sound icons: play the named file when installed, else speak the name.
     // The SPEAK reply (200 OK SPEAKING) is sent by the playback path —
     // stream_raw_pcm opens it immediately, the speak fallback defers it
-    // until audio exists (301 on failure).
+    // until audio exists (empty utterance on failure, issue #7).
     if msgtype_ == msgtype::SOUND_ICON {
         let icon_name = text.trim();
         play_sound_icon(icon_name);
@@ -312,30 +312,29 @@ pub extern "C" fn module_speak_sync(data: *const c_char, bytes: usize, msgtype_:
     }
 
     let Some(voice) = resolve_voice(&settings) else {
-        eprintln!("voicegarden-spd: no voice available for speak request");
-        unsafe { glue::module_speak_error() };
+        pipeline::complete_empty_utterance("no voice available for speak request");
         return;
     };
     let Some(engine) = engine_for(&voice) else {
-        eprintln!(
-            "voicegarden-spd: engine '{}' unavailable (not compiled in?)",
+        pipeline::complete_empty_utterance(&format!(
+            "engine '{}' unavailable (not compiled in?)",
             voice.engine_id
-        );
-        unsafe { glue::module_speak_error() };
+        ));
         return;
     };
 
     let processed = ssml::process(&text);
     let mut plain = processed.plain;
     if plain.trim().is_empty() {
-        unsafe { glue::module_speak_error() };
+        pipeline::complete_empty_utterance("speak request contained no speakable text");
         return;
     }
 
     // No early `200 OK SPEAKING`: pipeline::speak defers the reply until
     // synthesis has produced audio, so a failed (or audio-less) utterance
-    // reaches the server as `301 ERROR CANT SPEAK` instead of a silent
-    // success (issue #1).
+    // completes as an empty utterance instead of a silent success — and,
+    // crucially, never as a bare 301, which would leave the client
+    // blocked forever (issues #1 + #7).
 
     // Accessibility expansions (punctuation announcement, spelling,
     // capitals) apply to the plain text. Two delivery strategies:
