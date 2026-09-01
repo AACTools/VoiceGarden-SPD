@@ -127,11 +127,18 @@ if [ "$PKG_OK" != "1" ]; then
     install_user_tarball
 fi
 
-cat <<'EOF'
+RESTART_CMD="systemctl --user restart speech-dispatcher"
+if systemctl is-active --quiet speech-dispatcher 2>/dev/null; then
+    RESTART_CMD="sudo systemctl restart speech-dispatcher"
+elif command -v speech-dispatcher >/dev/null 2>&1; then
+    RESTART_CMD="sudo killall -HUP speech-dispatcher || sudo speech-dispatcher"
+fi
+
+cat <<EOF
 
 Done. To finish setup:
-  1. Restart speech-dispatcher (per user session):
-       systemctl --user restart speech-dispatcher.service
+  1. Restart speech-dispatcher:
+       $RESTART_CMD
   2. Test:
        spd-say -o voicegarden-spd "Hello from VoiceGarden"
   3. Optional cloud voices:
