@@ -203,7 +203,6 @@ fn install(model_id: &str) -> Result<(), String> {
                 );
             }
         }
-        }
     }
 
     if config_path.exists() && onnx_path.is_some() {
