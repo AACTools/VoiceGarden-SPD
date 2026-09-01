@@ -2,7 +2,6 @@
 //! (all 1300+ models, including ones not installed), and install models.
 
 use clap::Subcommand;
-use serde_json;
 use sherpa_onnx_models::ModelInfo;
 
 use crate::Style;
@@ -162,7 +161,7 @@ fn install(model_id: &str) -> Result<(), String> {
             // If dest exists, remove it first
             let _ = std::fs::remove_file(&dest);
             let _ = std::fs::remove_dir_all(&dest);
-            std::fs::rename(&entry.path(), &dest).map_err(|e| format!("rename {name:?}: {e}"))?;
+            std::fs::rename(entry.path(), &dest).map_err(|e| format!("rename {name:?}: {e}"))?;
         }
         std::fs::remove_dir(&nested).ok();
     }
@@ -204,31 +203,35 @@ fn install(model_id: &str) -> Result<(), String> {
         }
     }
 
-    if config_path.exists() && onnx_path.is_some() {
-        if let Ok(config) = std::fs::read_to_string(&config_path) {
-            if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config) {
-                let json_path = onnx_path.unwrap().with_extension("onnx.json");
-                if !json_path.exists() {
-                    let sample_rate = cfg
-                        .pointer("/audio/sample_rate")
-                        .and_then(|v| v.as_u64())
-                        .unwrap_or(22050);
-                    let hop_length = cfg.pointer("/audio/hop_length").and_then(|v| v.as_u64());
-                    let lang_code = model_id.split('-').next().unwrap_or("en").to_string();
-                    let mut minimal = serde_json::json!({
-                        "audio": {"sample_rate": sample_rate},
-                        "espeak": {"voice": lang_code},
-                        "dataset": "",
-                    });
-                    if let Some(hl) = hop_length {
-                        minimal["audio"]["hop_length"] = serde_json::json!(hl);
+    if config_path.exists() {
+        if let Some(ref onnx_path) = onnx_path {
+            if let Ok(config) = std::fs::read_to_string(&config_path) {
+                if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config) {
+                    let json_path = onnx_path.with_extension("onnx.json");
+                    if !json_path.exists() {
+                        let sample_rate = cfg
+                            .pointer("/audio/sample_rate")
+                            .and_then(|v| v.as_u64())
+                            .unwrap_or(22050);
+                        let hop_length = cfg.pointer("/audio/hop_length").and_then(|v| v.as_u64());
+                        let lang_code = model_id.split('-').next().unwrap_or("en").to_string();
+                        let mut minimal = serde_json::json!({
+                            "audio": {"sample_rate": sample_rate},
+                            "espeak": {"voice": lang_code},
+                            "dataset": "",
+                        });
+                        if let Some(hl) = hop_length {
+                            minimal["audio"]["hop_length"] = serde_json::json!(hl);
+                        }
+                        let _ = std::fs::write(
+                            &json_path,
+                            serde_json::to_string_pretty(&minimal).unwrap(),
+                        );
+                        eprintln!(
+                            "  generated minimal {}",
+                            json_path.file_name().unwrap_or_default().to_string_lossy()
+                        );
                     }
-                    let _ =
-                        std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
-                    eprintln!(
-                        "  generated minimal {}",
-                        json_path.file_name().unwrap_or_default().to_string_lossy()
-                    );
                 }
             }
         }
