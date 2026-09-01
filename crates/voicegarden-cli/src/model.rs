@@ -173,6 +173,39 @@ fn install(model_id: &str) -> Result<(), String> {
     // voice discovery — it provides language + audio metadata.
     let config_path = target.join("config.json");
     let onnx_path = find_onnx_in_dir(&target);
+
+    // For matcha models, download the standard hifigan vocoder.
+    // The sherpa-onnx matcha archives don't bundle a vocoder; one
+    // must be downloaded separately. `find_vocoder` in floravox-core
+    // discovers it by name in the model directory.
+    if model.model_type == "matcha" {
+        let vocoder_name = "hifigan_v2.onnx";
+        let vocoder_path = target.join(vocoder_name);
+        if !vocoder_path.exists() {
+            let vocoder_url = format!(
+                "https://github.com/k2-fsa/sherpa-onnx/releases/download/vocoder/{vocoder_name}"
+            );
+            eprintln!(
+                "{}Downloading vocoder {vocoder_name} from {vocoder_url}…",
+                st.dim("↓ ")
+            );
+            let status = std::process::Command::new("curl")
+                .args(["-fsSL", "-o", &vocoder_path.to_string_lossy(), &vocoder_url])
+                .stdout(std::process::Stdio::inherit())
+                .stderr(std::process::Stdio::inherit())
+                .status()
+                .map_err(|e| format!("could not run curl: {e}"))?;
+            if !status.success() {
+                eprintln!(
+                    "{}  Matcha models need a hifigan/vocos vocoder.\n  Place one at {} to enable this voice.",
+                    st.yellow("⚠ "),
+                    vocoder_path.display()
+                );
+            }
+        }
+        }
+    }
+
     if config_path.exists() && onnx_path.is_some() {
         if let Ok(config) = std::fs::read_to_string(&config_path) {
             if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config) {
@@ -182,16 +215,22 @@ fn install(model_id: &str) -> Result<(), String> {
                         .pointer("/audio/sample_rate")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(22050);
+                    let hop_length = cfg
+                        .pointer("/audio/hop_length")
+                        .and_then(|v| v.as_u64());
                     let lang_code = model_id
                         .split('-')
                         .next()
                         .unwrap_or("en")
                         .to_string();
-                    let minimal = serde_json::json!({
+                    let mut minimal = serde_json::json!({
                         "audio": {"sample_rate": sample_rate},
                         "espeak": {"voice": lang_code},
                         "dataset": "",
                     });
+                    if let Some(hl) = hop_length {
+                        minimal["audio"]["hop_length"] = serde_json::json!(hl);
+                    }
                     let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
                     eprintln!("  generated minimal {}", json_path.file_name().unwrap_or_default().to_string_lossy());
                 }
