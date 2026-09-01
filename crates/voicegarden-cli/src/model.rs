@@ -191,9 +191,6 @@ fn install(model_id: &str) -> Result<(), String> {
                         "audio": {"sample_rate": sample_rate},
                         "espeak": {"voice": lang_code},
                         "dataset": "",
-                        "num_symbols": 0,
-                        "num_speakers": 1,
-                        "phoneme_id_map": {},
                     });
                     let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
                     eprintln!("  generated minimal {}", json_path.file_name().unwrap_or_default().to_string_lossy());
