@@ -319,6 +319,7 @@ pub(crate) fn check_model(voice_name: &str) -> Result<(), String> {
             1.0,
             Some(&mut |chunk: &[u8]| total += chunk.len()),
             None,
+            None,
         )
         .map_err(|e| format!("synthesis failed: {e}"))?;
     if total == 0 {

@@ -332,7 +332,7 @@ fn speak_engine(
                         }
                         let _ = tx.send(Msg::Pcm(chunk.to_vec()));
                     }),
-                    Some(&mut |word, start, end, byte_offset, _len| {
+                    Some(&mut |word, start, end, byte_offset, _len, _estimated| {
                         let _ = tx.send(Msg::Boundary(Boundary {
                             word: word.to_string(),
                             start,
@@ -340,6 +340,7 @@ fn speak_engine(
                             byte_offset,
                         }));
                     }),
+                    None, // marks handled separately by SPD
                 )
             }));
             let done = match res {

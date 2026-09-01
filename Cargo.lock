@@ -427,12 +427,12 @@ dependencies = [
 
 [[package]]
 name = "floravox-core"
-version = "0.7.3"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a997db25f16059c5290bfa4b18b4f8f38b20041178cee74d6cb4feed7907c24"
+checksum = "3d1873916f716dc8f02c47e74d2d5ae956d12782acbbc252d1c30aaecf59ba04"
 dependencies = [
  "anyhow",
- "floravox-g2p 0.7.3",
+ "floravox-g2p 0.8.3",
  "floravox-ssml",
  "ndarray 0.16.1",
  "ort",
@@ -453,21 +453,22 @@ dependencies = [
 
 [[package]]
 name = "floravox-g2p"
-version = "0.7.3"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "eba63eda9ba54a94616f5b3ef2b86371515eef820e78305075042220f3d58d3a"
+checksum = "314140238940cafcd0ca0f0f9405dfb7806449bebf7340ee3a4e75bc758e6758"
 dependencies = [
  "fst",
  "memmap2",
  "misaki-rs",
  "ort",
+ "serde_json",
 ]
 
 [[package]]
 name = "floravox-ssml"
-version = "0.7.3"
+version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fe62093d70870dd763e31293d105f7d228bb12112ea1234a487a6aeb71ec56c1"
+checksum = "2b7200a3c31b6282134689280368367d8ca5954cccb0096759873c19e4d2dd2d"
 dependencies = [
  "quick-xml 0.38.4",
 ]
@@ -1515,15 +1516,15 @@ dependencies = [
 
 [[package]]
 name = "rust-tts-wrapper"
-version = "0.4.1"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.4.1#f0a8c3eab3ffae6b304647f206c9cf8dbbf06cc8"
+version = "0.5.0"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.1#43a8da2c1302e6ea74a1ac6c789cd498b956d414"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "cbindgen",
  "cc",
  "floravox-core",
- "floravox-g2p 0.7.3",
+ "floravox-g2p 0.8.3",
  "floravox-ssml",
  "reqwest",
  "serde",
@@ -2341,9 +2342,9 @@ dependencies = [
 
 [[package]]
 name = "voicegarden-lexicons"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ab05ef280153c76c4de133980e5edde4bde229693e2e32de04d41d9067dcd4da"
+checksum = "4dd2c0e0b65e20c9b653901a0b2f3b253278a70fb6f9cb282a4c3541893aa422"
 dependencies = [
  "anyhow",
  "flate2",

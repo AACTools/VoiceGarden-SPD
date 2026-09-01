@@ -38,6 +38,7 @@ pub fn preview_wav(voice: &VgVoice, text: &str) -> Result<(PathBuf, Option<Strin
             1.0,
             Some(&mut |chunk: &[u8]| pcm.extend_from_slice(chunk)),
             None,
+            None,
         )
         .map_err(|e| e.to_string())?;
     if pcm.is_empty() {

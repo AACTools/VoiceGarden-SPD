@@ -390,6 +390,7 @@ fn cmd_bench(voice: &str, text: &str, runs: usize, cfg_path: Option<&str>) -> Re
                 1.0,
                 Some(&mut |chunk: &[u8]| total += chunk.len()),
                 None,
+                None,
             )
             .map_err(|e| e.to_string())?;
         Ok((total, t0.elapsed()))
