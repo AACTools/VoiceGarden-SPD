@@ -1,7 +1,8 @@
 //! `voicegarden-spd model …` — search the full sherpa-onnx registry
-//! (all 1300+ models, including ones not installed).
+//! (all 1300+ models, including ones not installed), and install models.
 
 use clap::Subcommand;
+use serde_json;
 use sherpa_onnx_models::ModelInfo;
 
 use crate::Style;
@@ -26,6 +27,12 @@ pub enum ModelCmd {
         #[arg(long, default_value_t = 25)]
         limit: usize,
     },
+    /// Download + install a model from the registry
+    #[command(alias = "download")]
+    Install {
+        /// Model id from `model find` (e.g. "coqui-en-ljspeech")
+        model_id: String,
+    },
 }
 
 pub fn run(cmd: ModelCmd) -> Result<(), String> {
@@ -43,7 +50,164 @@ pub fn run(cmd: ModelCmd) -> Result<(), String> {
             multilingual,
             limit,
         ),
+        ModelCmd::Install { model_id } => install(&model_id),
     }
+}
+
+fn install(model_id: &str) -> Result<(), String> {
+    let st = Style::new();
+
+    let model = sherpa_onnx_models::models()
+        .values()
+        .find(|m: &&ModelInfo| m.id == model_id)
+        .ok_or_else(|| {
+            format!(
+                "model '{model_id}' not found in registry. Use `model find {model_id}` to search."
+            )
+        })?;
+
+    if model.url.contains("fp16") {
+        eprintln!(
+            "{}",
+            st.yellow(
+                "⚠ fp16 archives do not load in the CPU ONNX runtime this build links — pick a\n  non-fp16 variant of the model instead"
+            )
+        );
+        return Err("aborting installation of fp16 model".into());
+    }
+
+    // Check model type compatibility with the floravox engine.
+    // floravox drives piper-family models (vits, mms, matcha, kokoro).
+    // Audio-LM families (kitten, pocket, supertonic, zipvoice) were
+    // removed in v0.4.1.
+    let supported = ["vits", "mms", "matcha", "kokoro"];
+    if !supported.contains(&model.model_type.as_str()) {
+        eprintln!(
+            "{}",
+            st.yellow(&format!(
+                "⚠ model type '{}' may not be supported by the floravox engine.\n  Supported types: {}. Install anyway?",
+                model.model_type,
+                supported.join(", ")
+            ))
+        );
+    }
+
+    let home = std::env::var("HOME").unwrap_or_default();
+    let models_dir = std::path::Path::new(&home)
+        .join(".local/share/voicegarden/sherpa-onnx-models");
+    let target = models_dir.join(model_id);
+
+    if target.exists() {
+        eprintln!(
+            "model '{model_id}' is already installed at {}",
+            target.display()
+        );
+        return Ok(());
+    }
+
+    std::fs::create_dir_all(&target)
+        .map_err(|e| format!("could not create {target}: {e}", target = target.display()))?;
+
+    let url = &model.url;
+    let size_mb = model.filesize_mb;
+    eprintln!(
+        "{}Downloading {model_id} ({size_mb:.0} MB) from {url}…",
+        st.dim("↓ ")
+    );
+
+    // Pipe curl -> tar for streaming download + extract
+    let curl = std::process::Command::new("curl")
+        .args(["-fsSL", url])
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("could not run curl: {e}"))?;
+
+    // Auto-detect compression from URL extension
+    let tar_flags = if url.ends_with(".bz2") {
+        "-xjf"
+    } else if url.ends_with(".xz") {
+        "-xJf"
+    } else {
+        "-xzf"
+    };
+    let tar = std::process::Command::new("tar")
+        .args([tar_flags, "-", "-C", &target.to_string_lossy()])
+        .stdin(curl.stdout.unwrap())
+        .stdout(std::process::Stdio::inherit())
+        .stderr(std::process::Stdio::inherit())
+        .spawn()
+        .map_err(|e| format!("could not run tar: {e}"))?;
+
+    let output = tar
+        .wait_with_output()
+        .map_err(|e| format!("tar failed: {e}"))?;
+    if !output.status.success() {
+        let _ = std::fs::remove_dir_all(&target);
+        return Err(format!("extraction failed (tar exit {})", output.status));
+    }
+
+    // Flatten single nested directory (sherpa-onnx archives often
+    // contain a <model-id>/ subdirectory).
+    let entries: Vec<_> = std::fs::read_dir(&target)
+        .map_err(|e| format!("read dir: {e}"))?
+        .filter_map(|e| e.ok())
+        .collect();
+    if entries.len() == 1 && entries[0].file_type().map(|t| t.is_dir()).unwrap_or(false) {
+        let nested = entries[0].path();
+        for entry in std::fs::read_dir(&nested).map_err(|e| format!("read nested: {e}"))? {
+            let entry = entry.map_err(|e| format!("entry: {e}"))?;
+            let name = entry.file_name();
+            let dest = target.join(&name);
+            // If dest exists, remove it first
+            let _ = std::fs::remove_file(&dest);
+            let _ = std::fs::remove_dir_all(&dest);
+            std::fs::rename(&entry.path(), &dest)
+                .map_err(|e| format!("rename {name:?}: {e}"))?;
+        }
+        std::fs::remove_dir(&nested).ok();
+    }
+
+    // Generate a minimal .onnx.json if the model has a config.json
+    // (vits/piper models). The floravox engine requires this for
+    // voice discovery — it provides language + audio metadata.
+    let config_path = target.join("config.json");
+    let onnx_path = find_onnx_in_dir(&target);
+    if config_path.exists() && onnx_path.is_some() {
+        if let Ok(config) = std::fs::read_to_string(&config_path) {
+            if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config) {
+                let json_path = onnx_path.unwrap().with_extension("onnx.json");
+                if !json_path.exists() {
+                    let sample_rate = cfg
+                        .pointer("/audio/sample_rate")
+                        .and_then(|v| v.as_u64())
+                        .unwrap_or(22050);
+                    let lang_code = model_id
+                        .split('-')
+                        .next()
+                        .unwrap_or("en")
+                        .to_string();
+                    let minimal = serde_json::json!({
+                        "audio": {"sample_rate": sample_rate},
+                        "espeak": {"voice": lang_code},
+                        "dataset": "",
+                        "num_symbols": 0,
+                        "num_speakers": 1,
+                        "phoneme_id_map": {},
+                    });
+                    let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
+                    eprintln!("  generated minimal {}", json_path.file_name().unwrap_or_default().to_string_lossy());
+                }
+            }
+        }
+    }
+
+    eprintln!(
+        "{}Installed {model_id} to {}\n  Restart speech-dispatcher, then: spd-say -o voicegarden-spd -e 'Hello'",
+        st.green("✓ "),
+        target.display()
+    );
+    Ok(())
 }
 
 fn find(
@@ -95,7 +259,6 @@ fn find(
         })
         .collect();
 
-    // Installed models first, then by id for stable output.
     let home = std::env::var("HOME").unwrap_or_default();
     let primary = std::path::Path::new(&home).join(".local/share/voicegarden/sherpa-onnx-models");
     let legacy = std::path::Path::new(&home).join(".rust-tts-wrapper/sherpaonnx");
@@ -123,8 +286,6 @@ fn find(
                     .collect::<Vec<_>>()
                     .join(",")
             };
-            // fp16 archives abort in the CPU-only ONNX runtime this build
-            // links (uncatchable foreign exception) — flag them loudly.
             let quality = if m.url.contains("fp16") {
                 st.yellow(&format!("{} ⚠fp16", m.quality))
             } else {
@@ -160,11 +321,10 @@ fn find(
         println!(
             "{}",
             st.dim(&format!(
-                "install: download the archive, extract into {}/<model-id>/ — voices appear\n  after a speech-dispatcher restart",
+                "install: `voicegarden-spd model install <model-id>` or download + extract into {}/<model-id>/",
                 primary.display()
             ))
         );
-        // print the first non-installed match's URL as a concrete example
         if let Some(m) = sorted.iter().find(|m| !installed(m)) {
             println!("{}", st.dim(&format!("example: {}", m.url)));
         }
@@ -178,4 +338,26 @@ fn find(
         );
     }
     Ok(())
+}
+
+/// Find the first .onnx file in a directory (non-recursive).
+fn find_onnx_in_dir(dir: &std::path::Path) -> Option<std::path::PathBuf> {
+    let entries = std::fs::read_dir(dir).ok()?;
+    for entry in entries.filter_map(Result::ok) {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) == Some("onnx") {
+            return Some(path);
+        }
+        if path.is_dir() {
+            if let Ok(sub) = std::fs::read_dir(&path) {
+                for sub_entry in sub.filter_map(Result::ok) {
+                    let sub_path = sub_entry.path();
+                    if sub_path.extension().and_then(|e| e.to_str()) == Some("onnx") {
+                        return Some(sub_path);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
