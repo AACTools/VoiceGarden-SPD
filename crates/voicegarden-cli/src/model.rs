@@ -101,6 +101,11 @@ fn install(model_id: &str) -> Result<(), String> {
             "model '{model_id}' is already installed at {}",
             target.display()
         );
+        // Re-generate .onnx.json in case the generator improved
+        // (e.g. language code, hop_length, inference params).
+        if let Err(e) = generate_sidecar(&target, model_id, model) {
+            eprintln!("  ⚠ could not update sidecar: {e}");
+        }
         return Ok(());
     }
 
@@ -169,8 +174,8 @@ fn install(model_id: &str) -> Result<(), String> {
     // Generate a minimal .onnx.json if the model has a config.json
     // (vits/piper models). The floravox engine requires this for
     // voice discovery — it provides language + audio metadata.
-    let config_path = target.join("config.json");
-    let onnx_path = find_onnx_in_dir(&target);
+    let _config_path = target.join("config.json");
+    let _onnx_path = find_onnx_in_dir(&target);
 
     // For matcha models, download the standard hifigan vocoder.
     // The sherpa-onnx matcha archives don't bundle a vocoder; one
@@ -203,60 +208,73 @@ fn install(model_id: &str) -> Result<(), String> {
         }
     }
 
-    if config_path.exists() {
-        if let Some(ref onnx_path) = onnx_path {
-            if let Ok(config) = std::fs::read_to_string(&config_path) {
-                if let Ok(cfg) = serde_json::from_str::<serde_json::Value>(&config) {
-                    let json_path = onnx_path.with_extension("onnx.json");
-                    if !json_path.exists() {
-                        let sample_rate = cfg
-                            .pointer("/audio/sample_rate")
-                            .and_then(|v| v.as_u64())
-                            .unwrap_or(22050);
-                        let hop_length = cfg.pointer("/audio/hop_length").and_then(|v| v.as_u64());
-                        let lang_code = model
-                            .language
-                            .first()
-                            .map(|l| l.lang_code.split('-').next().unwrap_or("en"))
-                            .unwrap_or_else(|| model_id.split('-').next().unwrap_or("en"));
-                        let noise_scale = cfg
-                            .pointer("/inference/noise_scale")
-                            .or_else(|| cfg.pointer("/noise_scale"))
-                            .and_then(|v| v.as_f64());
-                        let length_scale = cfg
-                            .pointer("/inference/length_scale")
-                            .or_else(|| cfg.pointer("/length_scale"))
-                            .and_then(|v| v.as_f64());
-                        let mut minimal = serde_json::json!({
-                            "audio": {"sample_rate": sample_rate},
-                            "espeak": {"voice": lang_code},
-                            "dataset": "",
-                        });
-                        if let Some(hl) = hop_length {
-                            minimal["audio"]["hop_length"] = serde_json::json!(hl);
-                        }
-                        if noise_scale.is_some() || length_scale.is_some() {
-                            let mut inf = serde_json::json!({});
-                            if let Some(ns) = noise_scale {
-                                inf["noise_scale"] = serde_json::json!(ns);
-                            }
-                            if let Some(ls) = length_scale {
-                                inf["length_scale"] = serde_json::json!(ls);
-                            }
-                            minimal["inference"] = inf;
-                        }
-                        let _ = std::fs::write(
-                            &json_path,
-                            serde_json::to_string_pretty(&minimal).unwrap(),
-                        );
-                        eprintln!(
-                            "  generated minimal {}",
-                            json_path.file_name().unwrap_or_default().to_string_lossy()
-                        );
-                    }
-                }
-            }
+    fn generate_sidecar(
+        target: &std::path::Path,
+        model_id: &str,
+        model: &sherpa_onnx_models::ModelInfo,
+    ) -> Result<(), String> {
+        let config_path = target.join("config.json");
+        let onnx_path = find_onnx_in_dir(target);
+        if !config_path.exists() || onnx_path.is_none() {
+            return Ok(());
         }
+        let config =
+            std::fs::read_to_string(&config_path).map_err(|e| format!("read config: {e}"))?;
+        let cfg: serde_json::Value =
+            serde_json::from_str(&config).map_err(|e| format!("parse config: {e}"))?;
+        let onnx_path = onnx_path.unwrap();
+        let json_path = onnx_path.with_extension("onnx.json");
+        if json_path.exists() {
+            return Ok(());
+        }
+        let sample_rate = cfg
+            .pointer("/audio/sample_rate")
+            .and_then(|v| v.as_u64())
+            .unwrap_or(22050);
+        let hop_length = cfg.pointer("/audio/hop_length").and_then(|v| v.as_u64());
+        let lang_code = model
+            .language
+            .first()
+            .map(|l| l.lang_code.split('-').next().unwrap_or("en"))
+            .unwrap_or_else(|| model_id.split('-').next().unwrap_or("en"));
+        let noise_scale = cfg
+            .pointer("/inference/noise_scale")
+            .or_else(|| cfg.pointer("/noise_scale"))
+            .and_then(|v| v.as_f64());
+        let length_scale = cfg
+            .pointer("/inference/length_scale")
+            .or_else(|| cfg.pointer("/length_scale"))
+            .and_then(|v| v.as_f64());
+        let mut minimal = serde_json::json!({
+            "audio": {"sample_rate": sample_rate},
+            "espeak": {"voice": lang_code},
+            "dataset": "",
+        });
+        if let Some(hl) = hop_length {
+            minimal["audio"]["hop_length"] = serde_json::json!(hl);
+        }
+        if noise_scale.is_some() || length_scale.is_some() {
+            let mut inf = serde_json::json!({});
+            if let Some(ns) = noise_scale {
+                inf["noise_scale"] = serde_json::json!(ns);
+            }
+            if let Some(ls) = length_scale {
+                inf["length_scale"] = serde_json::json!(ls);
+            }
+            minimal["inference"] = inf;
+        }
+        std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap())
+            .map_err(|e| format!("write sidecar: {e}"))?;
+        eprintln!(
+            "  generated minimal {}",
+            json_path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        Ok(())
+    }
+
+    // After download + flatten, generate the sidecar
+    if let Err(e) = generate_sidecar(&target, model_id, model) {
+        eprintln!("  ⚠ sidecar: {e}");
     }
 
     eprintln!(
