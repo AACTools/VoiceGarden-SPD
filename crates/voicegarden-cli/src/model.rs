@@ -93,8 +93,8 @@ fn install(model_id: &str) -> Result<(), String> {
     }
 
     let home = std::env::var("HOME").unwrap_or_default();
-    let models_dir = std::path::Path::new(&home)
-        .join(".local/share/voicegarden/sherpa-onnx-models");
+    let models_dir =
+        std::path::Path::new(&home).join(".local/share/voicegarden/sherpa-onnx-models");
     let target = models_dir.join(model_id);
 
     if target.exists() {
@@ -162,8 +162,7 @@ fn install(model_id: &str) -> Result<(), String> {
             // If dest exists, remove it first
             let _ = std::fs::remove_file(&dest);
             let _ = std::fs::remove_dir_all(&dest);
-            std::fs::rename(&entry.path(), &dest)
-                .map_err(|e| format!("rename {name:?}: {e}"))?;
+            std::fs::rename(&entry.path(), &dest).map_err(|e| format!("rename {name:?}: {e}"))?;
         }
         std::fs::remove_dir(&nested).ok();
     }
@@ -214,14 +213,8 @@ fn install(model_id: &str) -> Result<(), String> {
                         .pointer("/audio/sample_rate")
                         .and_then(|v| v.as_u64())
                         .unwrap_or(22050);
-                    let hop_length = cfg
-                        .pointer("/audio/hop_length")
-                        .and_then(|v| v.as_u64());
-                    let lang_code = model_id
-                        .split('-')
-                        .next()
-                        .unwrap_or("en")
-                        .to_string();
+                    let hop_length = cfg.pointer("/audio/hop_length").and_then(|v| v.as_u64());
+                    let lang_code = model_id.split('-').next().unwrap_or("en").to_string();
                     let mut minimal = serde_json::json!({
                         "audio": {"sample_rate": sample_rate},
                         "espeak": {"voice": lang_code},
@@ -230,8 +223,12 @@ fn install(model_id: &str) -> Result<(), String> {
                     if let Some(hl) = hop_length {
                         minimal["audio"]["hop_length"] = serde_json::json!(hl);
                     }
-                    let _ = std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
-                    eprintln!("  generated minimal {}", json_path.file_name().unwrap_or_default().to_string_lossy());
+                    let _ =
+                        std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap());
+                    eprintln!(
+                        "  generated minimal {}",
+                        json_path.file_name().unwrap_or_default().to_string_lossy()
+                    );
                 }
             }
         }
