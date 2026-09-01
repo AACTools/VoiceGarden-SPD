@@ -227,6 +227,13 @@ fn install(model_id: &str) -> Result<(), String> {
         if json_path.exists() {
             return Ok(());
         }
+
+        // Read tokens.txt, case-fold to lowercase, and write as phoneme_id_map.
+        // This is critical for character-based models (Coqui) whose tokens.txt
+        // uses uppercase letters — the CharFrontend lowercases input, so the
+        // map must be lowercase too.
+        let tokens_path = target.join("tokens.txt");
+        let phoneme_id_map = tokens_txt_map_casefold(&tokens_path);
         let sample_rate = cfg
             .pointer("/audio/sample_rate")
             .and_then(|v| v.as_u64())
@@ -240,10 +247,12 @@ fn install(model_id: &str) -> Result<(), String> {
         let noise_scale = cfg
             .pointer("/inference/noise_scale")
             .or_else(|| cfg.pointer("/noise_scale"))
+            .or_else(|| cfg.pointer("/model_args/noise_scale"))
             .and_then(|v| v.as_f64());
         let length_scale = cfg
             .pointer("/inference/length_scale")
             .or_else(|| cfg.pointer("/length_scale"))
+            .or_else(|| cfg.pointer("/model_args/length_scale"))
             .and_then(|v| v.as_f64());
         let mut minimal = serde_json::json!({
             "audio": {"sample_rate": sample_rate},
@@ -262,6 +271,9 @@ fn install(model_id: &str) -> Result<(), String> {
                 inf["length_scale"] = serde_json::json!(ls);
             }
             minimal["inference"] = inf;
+        }
+        if let Some(map) = phoneme_id_map {
+            minimal["phoneme_id_map"] = map;
         }
         std::fs::write(&json_path, serde_json::to_string_pretty(&minimal).unwrap())
             .map_err(|e| format!("write sidecar: {e}"))?;
@@ -413,6 +425,29 @@ fn find(
         );
     }
     Ok(())
+}
+
+/// Read tokens.txt and case-fold the keys to lowercase.
+/// This is needed because the floravox engine's CharFrontend lowercases
+/// input text, but some models (Coqui) have uppercase tokens.
+fn tokens_txt_map_casefold(path: &std::path::Path) -> Option<serde_json::Value> {
+    let text = std::fs::read_to_string(path).ok()?;
+    let mut map: std::collections::BTreeMap<String, Vec<i64>> = std::collections::BTreeMap::new();
+    for line in text.lines() {
+        if let Some(idx) = line.rfind(' ') {
+            let (sym, id) = (line[..idx].trim_end_matches('\r'), &line[idx + 1..]);
+            if let Ok(id) = id.parse::<i64>() {
+                let sym = sym.to_lowercase();
+                if !sym.is_empty() {
+                    map.entry(sym).or_default().push(id);
+                }
+            }
+        }
+    }
+    if map.is_empty() {
+        return None;
+    }
+    serde_json::to_value(map).ok()
 }
 
 /// Find the first .onnx file in a directory (non-recursive).
