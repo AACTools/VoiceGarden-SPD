@@ -427,9 +427,9 @@ dependencies = [
 
 [[package]]
 name = "floravox-core"
-version = "0.8.3"
+version = "0.8.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3d1873916f716dc8f02c47e74d2d5ae956d12782acbbc252d1c30aaecf59ba04"
+checksum = "29418ce11b6a67b655ecd6cf4f7457a1e840b6672b024f59949296c40db6fad3"
 dependencies = [
  "anyhow",
  "floravox-g2p 0.8.3",
@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "0.5.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.1#43a8da2c1302e6ea74a1ac6c789cd498b956d414"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.2#8c0f1ce83d9430d9dc5de9bf177e5388ac06319e"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
