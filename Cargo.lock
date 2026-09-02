@@ -379,7 +379,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -427,12 +427,12 @@ dependencies = [
 
 [[package]]
 name = "floravox-core"
-version = "0.8.4"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29418ce11b6a67b655ecd6cf4f7457a1e840b6672b024f59949296c40db6fad3"
+checksum = "fb17dc8f4ce278339a9b78c2ee879eb18a4ad6cdf5befb67d9fc8359e8c25b24"
 dependencies = [
  "anyhow",
- "floravox-g2p 0.8.3",
+ "floravox-g2p 0.8.5",
  "floravox-ssml",
  "ndarray 0.16.1",
  "ort",
@@ -453,9 +453,9 @@ dependencies = [
 
 [[package]]
 name = "floravox-g2p"
-version = "0.8.3"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "314140238940cafcd0ca0f0f9405dfb7806449bebf7340ee3a4e75bc758e6758"
+checksum = "7a24a012b471081b097ae65b8c5693dc9fccefbb83c78205a12a828fd174f340"
 dependencies = [
  "fst",
  "memmap2",
@@ -466,9 +466,9 @@ dependencies = [
 
 [[package]]
 name = "floravox-ssml"
-version = "0.8.3"
+version = "0.8.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2b7200a3c31b6282134689280368367d8ca5954cccb0096759873c19e4d2dd2d"
+checksum = "739da2735138cb56a49cd8d5cdb67f5e18edaa32c44b6bf9f5c56d2b9ed12fac"
 dependencies = [
  "quick-xml 0.38.4",
 ]
@@ -1325,7 +1325,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1517,14 +1517,14 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "0.5.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.2#8c0f1ce83d9430d9dc5de9bf177e5388ac06319e"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.2#bd20600b95544f7e9dadeccf275cd31f042a97a3"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
  "cbindgen",
  "cc",
  "floravox-core",
- "floravox-g2p 0.8.3",
+ "floravox-g2p 0.8.5",
  "floravox-ssml",
  "reqwest",
  "serde",
@@ -1554,7 +1554,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1942,7 +1942,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -2328,7 +2328,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voicegarden-cli"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "clap",
  "rpassword",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "voicegarden-spd"
-version = "0.4.2"
+version = "0.4.3"
 dependencies = [
  "cc",
  "libc",
