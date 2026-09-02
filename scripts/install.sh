@@ -139,13 +139,13 @@ cat <<EOF
 Done. To finish setup:
   1. Restart speech-dispatcher:
        $RESTART_CMD
-  2. Test:
-       spd-say -o voicegarden-spd "Hello from VoiceGarden"
-  3. Optional cloud voices:
+  2. Find + install a voice:
+       voicegarden-spd model find en
+       voicegarden-spd model install kokoro-en-int8-v0_19
+  3. Test:
+       spd-say -o voicegarden-spd -y "kokoro" -e "Hello from VoiceGarden"
+  4. Optional cloud voices:
        ~/.config/voicegarden-spd/engines.json  (mode 600)
        voicegarden-spd refresh
-  4. Troubleshooting: voicegarden-spd doctor
-
-Local neural voices: models go in
-  ~/.local/share/voicegarden/sherpa-onnx-models/<model-id>/
+  5. Troubleshooting: voicegarden-spd doctor
 EOF
