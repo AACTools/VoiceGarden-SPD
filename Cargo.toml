@@ -9,10 +9,10 @@ rust-tts-wrapper = { git = "https://github.com/AACTools/rust-tts-wrapper", tag =
     "floravox-lexicons",
 ] }
 # Registry as typed data (model catalogue for voice search/download).
-sherpa-onnx-models = "0.1"
+sherpa-onnx-models = "0.2"
 
 [workspace.package]
-version = "0.4.3"
+version = "0.4.4"
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/AACTools/VoiceGarden-SPD"

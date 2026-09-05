@@ -379,7 +379,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1325,7 +1325,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1554,7 +1554,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1725,9 +1725,9 @@ dependencies = [
 
 [[package]]
 name = "sherpa-onnx-models"
-version = "0.1.0"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e4911e644e5c9d683468e6a6c5af61839be7fb5bea469237a1c82451f45808fe"
+checksum = "3939af963f28f5d25bcf4d766874ff625dd951e91d64dbd2e659050f116833c5"
 dependencies = [
  "serde",
  "serde_json",
@@ -1942,7 +1942,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2328,7 +2328,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "voicegarden-cli"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "clap",
  "rpassword",
@@ -2359,7 +2359,7 @@ dependencies = [
 
 [[package]]
 name = "voicegarden-spd"
-version = "0.4.3"
+version = "0.4.4"
 dependencies = [
  "cc",
  "libc",

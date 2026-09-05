@@ -112,6 +112,33 @@ fn install(model_id: &str) -> Result<(), String> {
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("could not create {target}: {e}", target = target.display()))?;
 
+    // If a durations_url exists, download the already-patched ONNX directly.
+    // This is much faster than downloading the full archive and patching.
+    if let Some(ref dur_url) = model.durations_url {
+        eprintln!("{}Downloading patched ONNX for {model_id}…", st.dim("↓ "));
+        let status = std::process::Command::new("curl")
+            .args([
+                "-fsSL",
+                "-o",
+                &target.join("model.onnx").to_string_lossy(),
+                dur_url,
+            ])
+            .stdout(std::process::Stdio::inherit())
+            .stderr(std::process::Stdio::inherit())
+            .status()
+            .map_err(|e| format!("could not run curl: {e}"))?;
+        if !status.success() {
+            return Err("download failed".into());
+        }
+        eprintln!(
+            "{}Installed {model_id} to {}\n  Restart speech-dispatcher, then: spd-say -o voicegarden-spd -y \"{voice}\" -e 'Hello'",
+            st.green("✓ "),
+            target.display(),
+            voice = model_id.split('-').next().unwrap_or(model_id)
+        );
+        return Ok(());
+    }
+
     let url = &model.url;
     let size_mb = model.filesize_mb;
     eprintln!(
