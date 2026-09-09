@@ -1517,7 +1517,7 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "0.5.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.5.2#bd20600b95544f7e9dadeccf275cd31f042a97a3"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v0.6.0#9b8cf38215aa53e819593408488f790318e54550"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -1780,9 +1780,9 @@ dependencies = [
 
 [[package]]
 name = "speechmarkdown-rust"
-version = "0.4.13"
+version = "0.4.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f5ff3afebeb2aacf8c5d6fdcd9c218d542d814b0db913a941e8abaa8c8b321c0"
+checksum = "c065e865663b93e4becf8b8f532731186ae03c8d8644201e25a8d815ff9ecff7"
 dependencies = [
  "ipa-translate",
  "quick-xml 0.37.5",
