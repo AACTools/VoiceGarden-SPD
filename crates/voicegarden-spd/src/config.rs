@@ -114,7 +114,7 @@ impl ModuleConfig {
                     }
                 }
                 "LocalEngine" => {
-                    if value == "sherpaonnx" || value == "sherpaonnx" {
+                    if value == "sherpaonnx" {
                         self.local_engine = value;
                     } else {
                         eprintln!(

@@ -91,7 +91,7 @@ impl VgVoice {
     /// Local vs cloud source.
     #[must_use]
     pub fn source(&self) -> Source {
-        if matches!(self.engine_id.as_str(), "sherpaonnx" | "sherpaonnx") {
+        if matches!(self.engine_id.as_str(), "sherpaonnx") {
             Source::Local
         } else {
             Source::Cloud
