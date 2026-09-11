@@ -91,7 +91,7 @@ impl VgVoice {
     /// Local vs cloud source.
     #[must_use]
     pub fn source(&self) -> Source {
-        if matches!(self.engine_id.as_str(), "sherpaonnx" | "floravox") {
+        if matches!(self.engine_id.as_str(), "sherpaonnx" | "sherpaonnx") {
             Source::Local
         } else {
             Source::Cloud
@@ -266,7 +266,7 @@ pub fn local_voices(
                     info.model_type.as_str(),
                     "vits" | "mms" | "matcha" | "kokoro"
                 );
-                if drivable && engine_pref == "floravox" {
+                if drivable && engine_pref == "sherpaonnx" {
                     // lang routes the published lexicon bundle
                     // (voicegarden-lexicons) for phoneme-map voices;
                     // MMS-style character-table voices are auto-detected
@@ -284,7 +284,7 @@ pub fn local_voices(
                         spd_name: format!("{id}#{sid}"),
                         language: lang.clone(),
                         variant: String::new(),
-                        engine_id: "floravox".into(),
+                        engine_id: "sherpaonnx".into(),
                         engine_voice_id: id.clone(),
                         credentials: creds.to_string(),
                         // If floravox cannot load this model's graph,
@@ -443,10 +443,10 @@ mod tests {
         let kitten = dir.path().join("micro-en-v0_8");
         std::fs::create_dir_all(&kitten).unwrap();
 
-        let fv = local_voices(&[dir.path().to_path_buf()], 2, "floravox");
+        let fv = local_voices(&[dir.path().to_path_buf()], 2, "sherpaonnx");
         assert_eq!(fv.len(), 2, "{fv:?}");
         let vits_v = fv.iter().find(|v| v.spd_name.starts_with("piper")).unwrap();
-        assert_eq!(vits_v.engine_id, "floravox");
+        assert_eq!(vits_v.engine_id, "sherpaonnx");
         assert!(vits_v.ssml_capable);
         // plain name, no engine prefix
         assert_eq!(vits_v.spd_name, "piper-en_US-lessac-high#0");
@@ -480,7 +480,7 @@ mod tests {
     #[test]
     fn local_engine_config_parses_and_rejects() {
         let mut cfg = crate::config::ModuleConfig::default();
-        assert_eq!(cfg.local_engine, "floravox");
+        assert_eq!(cfg.local_engine, "sherpaonnx");
         cfg.apply("LocalEngine sherpaonnx\n");
         assert_eq!(cfg.local_engine, "sherpaonnx");
         cfg.apply("LocalEngine nonsense\n");

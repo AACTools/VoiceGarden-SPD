@@ -112,13 +112,10 @@ fn install(model_id: &str) -> Result<(), String> {
     std::fs::create_dir_all(&target)
         .map_err(|e| format!("could not create {target}: {e}", target = target.display()))?;
 
-    // If a durations_url (or the int8 variant) exists, download the
     // already-patched ONNX directly — much faster than the full archive.
     // Prefer the int8 build when available (~4x smaller, same timings).
     let dur_url = model
-        .durations_url_int8
         .as_ref()
-        .or(model.durations_url.as_ref());
     if let Some(dur_url) = dur_url {
         eprintln!("{}Downloading patched ONNX for {model_id}…", st.dim("↓ "));
         let status = std::process::Command::new("curl")

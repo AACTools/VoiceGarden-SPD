@@ -27,7 +27,7 @@ pub struct ModuleConfig {
     pub chunk_ms: u32,
     /// ONNX runtime intra-op thread count for sherpa-onnx models.
     pub num_threads: i32,
-    /// Which engine drives local model voices: "floravox" (default —
+    /// Which engine drives local model voices: "sherpaonnx" (default —
     /// SSML, SpeechMarkdown, measured word timings) or "sherpaonnx".
     /// Registry-decidable: audio-LM families always use sherpa-onnx.
     pub local_engine: String,
@@ -48,7 +48,7 @@ impl Default for ModuleConfig {
             default_voice: None,
             chunk_ms: 250,
             num_threads: 2,
-            local_engine: "floravox".into(),
+            local_engine: "sherpaonnx".into(),
             sound_icon_folder: "/usr/share/sounds/sound-icons".into(),
         }
     }
@@ -114,7 +114,7 @@ impl ModuleConfig {
                     }
                 }
                 "LocalEngine" => {
-                    if value == "floravox" || value == "sherpaonnx" {
+                    if value == "sherpaonnx" || value == "sherpaonnx" {
                         self.local_engine = value;
                     } else {
                         eprintln!(

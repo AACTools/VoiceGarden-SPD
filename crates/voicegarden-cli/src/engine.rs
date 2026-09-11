@@ -90,7 +90,7 @@ fn list(cfg_path: Option<&str>) -> Result<(), String> {
                 .count()
                 .to_string()
         };
-        let (cred_state, voices) = if matches!(e.id.as_str(), "floravox" | "sherpaonnx") {
+        let (cred_state, voices) = if matches!(e.id.as_str(), "sherpaonnx" | "sherpaonnx") {
             (st.dim("none needed"), local_count())
         } else if !e.needs_credentials {
             (st.dim("none needed"), cache_count(&cfg, &e.id).to_string())

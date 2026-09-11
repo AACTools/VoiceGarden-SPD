@@ -365,7 +365,7 @@ fn speak_engine(
     // applied (durations tensor reflects rate), so no rescale; cloud
     // timings likewise.
     let is_sherpa = voice.engine_id == "sherpaonnx";
-    let rate = if matches!(voice.engine_id.as_str(), "sherpaonnx" | "floravox") {
+    let rate = if matches!(voice.engine_id.as_str(), "sherpaonnx" | "sherpaonnx") {
         voice.sample_rate.unwrap_or(22_050)
     } else {
         voice.pcm_rate.max(8_000)
