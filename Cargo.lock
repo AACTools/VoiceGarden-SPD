@@ -1285,7 +1285,7 @@ dependencies = [
 [[package]]
 name = "rust-tts-wrapper"
 version = "1.0.0"
-source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v1.0.0#04474207d8796bff453ba7da511276e1ae3efd4d"
+source = "git+https://github.com/AACTools/rust-tts-wrapper?tag=v1.0.0#e3cefe9943d3b34307fd9b9e9a4db25bc8dcd698"
 dependencies = [
  "anyhow",
  "base64",
@@ -1465,9 +1465,9 @@ dependencies = [
 
 [[package]]
 name = "sherpa-onnx"
-version = "1.13.5"
+version = "1.13.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "352a5dbbd9623e800be27e77de514e87fcfe2120256acc4434e6ea87a56bc885"
+checksum = "efaa98d5f08380f3d47026e00f60fed182f6edaf4c0af290d88ac0e08d6e3b90"
 dependencies = [
  "serde",
  "serde_json",

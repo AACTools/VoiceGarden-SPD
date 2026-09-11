@@ -300,7 +300,7 @@ pub fn local_voices(
                         )),
                         sample_rate: Some(info.sample_rate),
                         pcm_rate: info.sample_rate,
-                        ssml_capable: true,
+                        ssml_capable: false,
                         display_name: display.clone(),
                         gender: "Unknown".into(),
                         quality: info.quality.clone(),
@@ -434,7 +434,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn local_voices_default_to_floravox_for_drivable_families() {
+    fn local_voices_default_to_sherpaonnx_for_drivable_families() {
         let dir = tempfile::tempdir().unwrap();
         // piper-en_US-lessac-high is in the real registry (vits family)
         let vits = dir.path().join("piper-en_US-lessac-high");
@@ -447,7 +447,7 @@ mod tests {
         assert_eq!(fv.len(), 2, "{fv:?}");
         let vits_v = fv.iter().find(|v| v.spd_name.starts_with("piper")).unwrap();
         assert_eq!(vits_v.engine_id, "sherpaonnx");
-        assert!(vits_v.ssml_capable);
+        assert!(!vits_v.ssml_capable);
         // plain name, no engine prefix
         assert_eq!(vits_v.spd_name, "piper-en_US-lessac-high#0");
         // sherpa fallback attached
